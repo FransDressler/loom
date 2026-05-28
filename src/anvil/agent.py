@@ -1,0 +1,146 @@
+"""Thin wrapper around the Claude Agent SDK that runs ANVIL over the vault."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ClaudeSDKClient,
+    ResultMessage,
+    TextBlock,
+    ToolUseBlock,
+    query,
+)
+
+from .prompt import build_system_prompt
+
+DIM = "\033[2m"
+CYAN = "\033[36m"
+RESET = "\033[0m"
+
+ALLOWED_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"]
+
+
+def build_options(vault: str, model: str | None) -> ClaudeAgentOptions:
+    return ClaudeAgentOptions(
+        cwd=vault,
+        system_prompt=build_system_prompt(),
+        allowed_tools=ALLOWED_TOOLS,
+        # Auto-accept file edits so captures don't prompt every turn; the agent is
+        # scoped to the vault via cwd and the system prompt.
+        permission_mode="acceptEdits",
+        model=model,
+        # Keep the agent self-contained: don't inherit the user's global CLAUDE.md
+        # or MCP config, which are tuned for coding rather than note-taking.
+        setting_sources=None,
+    )
+
+
+def _tool_hint(block: ToolUseBlock) -> str:
+    inp = block.input or {}
+    for key in ("file_path", "path", "pattern", "query", "url"):
+        if key in inp:
+            return str(inp[key])
+    return ""
+
+
+def _render(msg: object, verbose: bool) -> None:
+    if isinstance(msg, AssistantMessage):
+        for block in msg.content:
+            if isinstance(block, TextBlock):
+                if block.text.strip():
+                    print(block.text, flush=True)
+            elif isinstance(block, ToolUseBlock) and verbose:
+                print(f"{DIM}· {block.name} {_tool_hint(block)}{RESET}", flush=True)
+    elif isinstance(msg, ResultMessage) and verbose:
+        cost = f" ${msg.total_cost_usd:.4f}" if msg.total_cost_usd else ""
+        print(f"{DIM}[{msg.num_turns} turns, {msg.duration_ms} ms{cost}]{RESET}", flush=True)
+
+
+async def run_once(text: str, options: ClaudeAgentOptions, verbose: bool) -> None:
+    async for msg in query(prompt=text, options=options):
+        _render(msg, verbose)
+
+
+async def run_research(
+    topic: str, sources: list[str], options: ClaudeAgentOptions, verbose: bool
+) -> None:
+    """Research `topic` and build a Hub + sub-note cluster in the vault.
+
+    `options` must come from research.build_research_options (research prompt +
+    the ocr_document tool). `sources` are extra local paths or URLs the user
+    wants OCR'd in addition to whatever the agent discovers.
+    """
+    prompt = f"Recherchiere dieses Thema und baue daraus einen Notiz-Cluster: {topic}"
+    if sources:
+        listed = "\n".join(f"- {s}" for s in sources)
+        prompt += (
+            "\n\nBeziehe diese vom Nutzer gelieferten Quellen ein und lass sie durch "
+            f"das ocr_document-Tool laufen (PDFs/Bilder):\n{listed}"
+        )
+    async for msg in query(prompt=prompt, options=options):
+        _render(msg, verbose)
+
+
+async def run_capture(text: str, options: ClaudeAgentOptions) -> str:
+    """Run ANVIL on `text` headlessly and return its final text reply.
+
+    Used by non-interactive entry points (e.g. the iMessage inbox) that need the
+    agent's "saved to ..." confirmation rather than streaming output to a TTY.
+    """
+    parts: list[str] = []
+    async for msg in query(prompt=text, options=options):
+        if isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, TextBlock) and block.text.strip():
+                    parts.append(block.text.strip())
+    return "\n".join(parts).strip()
+
+
+async def run_stream(text: str, options: ClaudeAgentOptions) -> AsyncIterator[str]:
+    """Run ANVIL on `text` and yield assistant text as it arrives.
+
+    Used by the web front-end to stream a reply into the browser. Like
+    run_capture this is stateless: each call is an independent capture/recall,
+    matching how the iMessage inbox treats each message.
+    """
+    async for msg in query(prompt=text, options=options):
+        if isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, TextBlock) and block.text.strip():
+                    yield block.text
+
+
+async def run_repl(options: ClaudeAgentOptions, verbose: bool) -> None:
+    print(f"{CYAN}ANVIL{RESET} — second brain ready. Type a thought to capture or a "
+          f"question to recall. /research <topic> to build a note cluster, /exit to quit.\n")
+    async with ClaudeSDKClient(options=options) as client:
+        while True:
+            try:
+                line = input(f"{CYAN}anvil>{RESET} ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if not line:
+                continue
+            if line in {"/exit", "/quit", "/q"}:
+                break
+            if line.startswith("/research"):
+                topic = line[len("/research"):].strip()
+                if not topic:
+                    print(f"{DIM}usage: /research <topic>{RESET}")
+                    continue
+                # One-shot research run with its own prompt + ocr_document tool;
+                # the persistent capture/recall client stays untouched.
+                from .research import build_research_options
+
+                r_options = build_research_options(options.cwd, options.model)
+                await run_research(topic, [], r_options, verbose)
+                print()
+                continue
+            await client.query(line)
+            async for msg in client.receive_response():
+                _render(msg, verbose)
+            print()
