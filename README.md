@@ -57,6 +57,14 @@ Relevant settings (all env-overridable, see `src/anvil/config.py`):
 
 - `anvil-imessage` — capture thoughts (and OCR document attachments) sent to an
   iMessage chat via a BlueBubbles relay.
+- `anvil-whatsapp` — the same inbox over WhatsApp, via a [WAHA](https://waha.devlike.pro)
+  relay. WAHA runs the WhatsApp HTTP API in Docker, linked to a dedicated
+  WhatsApp account via QR (like WhatsApp Web) — **no Meta Business account
+  needed**. Run it on a separate number and message that account from your phone;
+  the inbox skips its own outgoing messages, so you never see your text doubled.
+  Same OCR / audio / link handling as the iMessage inbox. Set it up via the
+  `ANVIL_WA_*` variables in `deploy/anvil.env.example`; find the chat id with
+  `anvil-whatsapp --list-chats`.
 - `anvil-web` — small token-gated chat front-end over the same agent.
 - `anvil-cleaner` — daily non-destructive gardening pass.
 - `anvil-archive` — summarizes finished Claude Code sessions into the vault.

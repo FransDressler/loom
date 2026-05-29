@@ -19,25 +19,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import re
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from pathlib import Path
 
-from . import cleaner, config, confirm, figures, mathpix, mdconvert
+from . import cleaner, config, confirm, inbox, mathpix, mdconvert
 from .agent import build_options, run_capture
 
 # Importing cleaner registers its delete_note handler with confirm, so a pending
 # deletion proposal can be resolved here via confirm.try_resolve.
 
-# Prefix on every confirmation ANVIL sends back, so the next poll recognises its
-# own messages and never captures or loops on them.
-CONFIRM_PREFIX = "✅ ANVIL"
-# Cap on remembered message GUIDs (dedup window across polls).
-SEEN_LIMIT = 1000
 # Re-fetch a little before the cursor so a boundary message is never missed,
 # regardless of whether the API's `after` filter is inclusive.
 BACKTRACK_MS = 60_000
@@ -125,27 +118,7 @@ def send_text(chat_guid: str, message: str) -> None:
     )
 
 
-# --- cursor state --------------------------------------------------------------
-
-def _state_path() -> Path:
-    return Path(config.STATE_DIR) / "imessage.json"
-
-
-def _load_state() -> dict:
-    path = _state_path()
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def _save_state(state: dict) -> None:
-    path = _state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2))
-
+# --- noise & attachment classification -----------------------------------------
 
 def _is_noise(msg: dict, text: str) -> bool:
     """True for messages we must never capture (reactions, system items, our own replies)."""
@@ -153,11 +126,7 @@ def _is_noise(msg: dict, text: str) -> bool:
         return True
     if msg.get("itemType", 0) != 0:  # group rename, member change, etc.
         return True
-    if text.startswith(CONFIRM_PREFIX):  # our own confirmation / warning
-        return True
-    if text.startswith(confirm.PROPOSAL_PREFIX):  # our own confirm proposal
-        return True
-    if text.startswith(cleaner.PROPOSAL_PREFIX):  # legacy/local cleaner proposal header
+    if inbox.is_own_message(text):  # our own confirmation / warning / confirm proposal
         return True
     return False
 
@@ -170,7 +139,7 @@ def _document_attachments(msg: dict) -> list[dict]:
             continue
         if (att.get("totalBytes") or 0) == 0:
             continue
-        if not mathpix.is_supported(att.get("mimeType") or ""):
+        if not inbox.is_document(att.get("mimeType") or ""):
             continue
         docs.append(att)
     return docs
@@ -184,7 +153,7 @@ def _media_attachments(msg: dict) -> list[dict]:
             continue
         if (att.get("totalBytes") or 0) == 0:
             continue
-        if mdconvert.supports_attachment(att.get("mimeType") or ""):
+        if inbox.is_media(att.get("mimeType") or ""):
             docs.append(att)
     return docs
 
@@ -196,127 +165,40 @@ def _reply(chat: str, message: str) -> None:
     if not (config.BB_REPLY and message):
         return
     try:
-        send_text(chat, f"{CONFIRM_PREFIX} · {message}"[:1500])
+        send_text(chat, f"{inbox.CONFIRM_PREFIX} · {message}"[:1500])
     except BlueBubblesError as exc:
         print(f"reply failed: {exc}", file=sys.stderr, flush=True)
 
 
-def _safe_filename(name: str, fallback: str) -> str:
-    name = (name or "").strip().replace("/", "_").replace("\\", "_")
-    name = re.sub(r"[^\w.\-]+", "_", name, flags=re.U).strip("._")
-    return name or fallback
-
-
-def _store_asset(name: str, guid: str, data: bytes) -> str:
-    """Copy an original attachment into the vault; return its bare filename for embedding."""
-    assets = Path(config.VAULT_PATH) / config.DOC_ASSET_DIR
-    assets.mkdir(parents=True, exist_ok=True)
-    target = assets / _safe_filename(name, f"attachment-{guid[:8] or 'file'}")
-    if target.exists() and target.read_bytes() != data:
-        target = assets / f"{target.stem}-{guid[:8]}{target.suffix}"
-    target.write_bytes(data)
-    return target.name
-
-
 def _capture_document(att: dict, caption: str, options, verbose: bool) -> str:
-    """OCR one document attachment and have the agent file it into the vault."""
+    """Download a document attachment and hand it to the shared OCR/capture path."""
     guid = att.get("guid") or ""
     mime = (att.get("mimeType") or "").lower()
     name = att.get("transferName") or f"attachment-{guid[:8] or 'file'}"
-
     if verbose:
         print(f"OCR document: {name!r} ({mime})", file=sys.stderr, flush=True)
-
     data = download_attachment(guid)
-    mmd = mathpix.convert(data, mime, name)
-    asset_name = _store_asset(name, guid, data)
-
-    # Mathpix returns figures inside PDFs as remote image links; pull them into
-    # the vault and caption them with a cheap Claude (Haiku) pass.
-    if mmd and config.DESCRIBE_IMAGES:
-        mmd = figures.enrich_markdown(
-            mmd,
-            assets_dir=Path(config.VAULT_PATH) / config.DOC_ASSET_DIR,
-            model=config.DESCRIBE_MODEL,
-            max_images=config.DESCRIBE_MAX_IMAGES,
-            verbose=verbose,
-        )
-
-    caption_line = f"Mein Begleittext dazu: »{caption}«. " if caption else ""
-    ocr_block = (
-        "--- OCR (Mathpix Markdown) ---\n" + mmd
-        if mmd
-        else "Mathpix hat keinen Text erkannt — lege trotzdem eine Notiz mit der eingebetteten Datei an."
+    return inbox.capture_document(
+        data, name, mime, caption, options, channel="iMessage", key=guid, verbose=verbose,
     )
-    prompt = (
-        f"Ich habe ein Dokument per iMessage geschickt: »{name}«. "
-        f"Es wurde per Mathpix OCR in Markdown umgewandelt. "
-        f"Die Originaldatei liegt bereits im Vault unter »{config.DOC_ASSET_DIR}/{asset_name}«; "
-        f"binde sie in die Notiz ein mit ![[{asset_name}]]. "
-        + caption_line
-        + "Lege den Inhalt als neue Notiz an: wähle einen passenden Titel und Ablageort, "
-        "übernimm den OCR-Inhalt vollständig und unverändert (korrigiere nur eindeutige OCR-Artefakte), "
-        "ergänze Frontmatter und sinnvolle Tags, und verlinke mit verwandten Notizen.\n\n"
-        + ocr_block
-    )
-    return asyncio.run(run_capture(prompt, options))
-
-
-def _file_markdown(
-    label: str, source_name: str, source_ref: str, md_text: str,
-    caption: str, embed: str | None, options,
-) -> str:
-    """Have the agent file MarkItDown output (transcript/article/book) as a note."""
-    if len(md_text) > config.MARKITDOWN_MAX_CHARS:
-        md_text = md_text[: config.MARKITDOWN_MAX_CHARS] + "\n\n…(gekürzt)"
-    embed_line = (
-        f"Die Originaldatei liegt bereits im Vault unter »{config.DOC_ASSET_DIR}/{embed}«; "
-        f"binde sie in die Notiz ein mit ![[{embed}]]. "
-        if embed
-        else ""
-    )
-    caption_line = f"Mein Begleittext dazu: »{caption}«. " if caption else ""
-    prompt = (
-        f"Ich habe {label} per iMessage geschickt: »{source_name}«. "
-        f"Es wurde zu Markdown umgewandelt (Inhalt/Transkript unten). "
-        f"Quelle: {source_ref}. "
-        + embed_line
-        + caption_line
-        + "Lege den Inhalt als neue Notiz an: wähle einen passenden Titel und Ablageort, "
-        "strukturiere und fasse den Inhalt sinnvoll zusammen (das Wesentliche erhalten, "
-        "nicht stumpf 1:1 kopieren), ergänze Frontmatter und sinnvolle Tags, verlinke mit "
-        "verwandten Notizen, und vermerke die Quelle in der Notiz.\n\n"
-        "--- Inhalt (MarkItDown) ---\n" + md_text
-    )
-    return asyncio.run(run_capture(prompt, options))
 
 
 def _capture_media(att: dict, caption: str, options, verbose: bool) -> str:
-    """Convert one audio/EPub attachment via MarkItDown and file it into the vault."""
+    """Download an audio/EPub attachment and hand it to the shared MarkItDown path."""
     guid = att.get("guid") or ""
     mime = (att.get("mimeType") or "").lower()
     name = att.get("transferName") or f"attachment-{guid[:8] or 'file'}"
-    kind = mdconvert.kind_of(mime)
-
     if verbose:
-        print(f"MarkItDown {kind}: {name!r} ({mime})", file=sys.stderr, flush=True)
-
+        print(f"MarkItDown {mdconvert.kind_of(mime)}: {name!r} ({mime})", file=sys.stderr, flush=True)
     data = download_attachment(guid)
-    md_text = mdconvert.convert_bytes(data, mime, name)
-    asset_name = _store_asset(name, guid, data)
-    label = {"audio": "eine Audiodatei", "epub": "ein EPub"}.get(kind, "eine Datei")
-    return _file_markdown(label, name, name, md_text, caption, asset_name, options)
+    return inbox.capture_media(data, name, mime, caption, options, channel="iMessage", key=guid)
 
 
 def _capture_url(url: str, text: str, options, verbose: bool) -> str:
     """Fetch a texted-in link (YouTube/web) via MarkItDown and file it into the vault."""
     if verbose:
         print(f"MarkItDown URL: {url}", file=sys.stderr, flush=True)
-    md_text = mdconvert.convert_url(url)
-    caption = (text or "").replace(url, "").strip()
-    is_yt = "youtube.com" in url or "youtu.be" in url
-    label = "ein YouTube-Video" if is_yt else "einen Link"
-    return _file_markdown(label, url, url, md_text, caption, None, options)
+    return inbox.capture_url(url, text, options, channel="iMessage")
 
 
 # --- poll ----------------------------------------------------------------------
@@ -326,7 +208,7 @@ def poll(verbose: bool = False) -> int:
     if not chat:
         raise BlueBubblesError("ANVIL_BB_CHAT_GUID is not set — run with --list-chats to find it.")
 
-    state = _load_state()
+    state = inbox.load_state("imessage")
     entry = state.get(chat, {})
     last_ts: int = entry.get("last_ts", 0)
     seen: list[str] = entry.get("seen", [])
@@ -415,8 +297,8 @@ def poll(verbose: bool = False) -> int:
         captured += 1
         _reply(chat, reply)
 
-    state[chat] = {"last_ts": last_ts, "seen": seen[-SEEN_LIMIT:]}
-    _save_state(state)
+    state[chat] = {"last_ts": last_ts, "seen": seen[-inbox.SEEN_LIMIT:]}
+    inbox.save_state("imessage", state)
     return captured
 
 

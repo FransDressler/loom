@@ -15,6 +15,7 @@ dependencies = [
 anvil = "anvil.cli:main"
 anvil-archive = "anvil.archive:main"
 anvil-imessage = "anvil.imessage:main"
+anvil-whatsapp = "anvil.whatsapp:main"
 anvil-cleaner = "anvil.cleaner:main"
 anvil-web = "anvil.web:main"
 
