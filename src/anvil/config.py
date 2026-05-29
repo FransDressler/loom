@@ -30,6 +30,25 @@ BB_SEND_METHOD: str = os.environ.get("ANVIL_BB_SEND_METHOD", "apple-script")
 BB_REPLY: bool = os.environ.get("ANVIL_BB_REPLY", "1").lower() not in ("0", "false", "no", "")
 BB_TIMEOUT: int = int(os.environ.get("ANVIL_BB_TIMEOUT", "30"))
 
+# --- WhatsApp inbox via a WAHA relay -------------------------------------------
+# WAHA (https://waha.devlike.pro) runs the WhatsApp HTTP API in Docker, linked to
+# a dedicated WhatsApp account via QR (like WhatsApp Web) — no Meta Business
+# account needed. ANVIL polls it. Run WAHA on a separate number and message that
+# account from your own phone.
+WA_URL: str = os.environ.get("ANVIL_WA_URL", "http://localhost:3000")
+# WAHA API key (set if the WAHA server has WHATSAPP_API_KEY configured).
+WA_API_KEY: str = os.environ.get("ANVIL_WA_API_KEY", "")
+# WAHA session name (WAHA's default session is "default").
+WA_SESSION: str = os.environ.get("ANVIL_WA_SESSION", "default")
+# The chat ANVIL watches and replies into, as a WhatsApp JID, e.g.
+# "49123456789@c.us". Use `anvil-whatsapp --list-chats` to find it.
+WA_CHAT_ID: str = os.environ.get("ANVIL_WA_CHAT_ID", "")
+# Send a short confirmation back into the chat after each capture.
+WA_REPLY: bool = os.environ.get("ANVIL_WA_REPLY", "1").lower() not in ("0", "false", "no", "")
+WA_TIMEOUT: int = int(os.environ.get("ANVIL_WA_TIMEOUT", "30"))
+# How many recent messages to pull per poll (filtered down by the cursor).
+WA_FETCH_LIMIT: int = int(os.environ.get("ANVIL_WA_FETCH_LIMIT", "100"))
+
 # --- Mathpix OCR (for document/image attachments sent via iMessage) ------------
 # When set, image and PDF attachments are run through Mathpix OCR and the
 # resulting Markdown is captured into the vault. Get credentials at
