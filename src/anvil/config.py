@@ -65,6 +65,22 @@ RESEARCH_MAX_TURNS: int = int(os.environ.get("ANVIL_RESEARCH_MAX_TURNS", "80"))
 # Safety cap on how many documents one research run will OCR through Mathpix.
 RESEARCH_MAX_PDFS: int = int(os.environ.get("ANVIL_RESEARCH_MAX_PDFS", "10"))
 
+# --- Deep research (anvil research --deep) -------------------------------------
+# A planner discovers many sources, a fan-out of sub-agents writes one note per
+# source, then a synthesis pass builds the Hub/MOC. Much heavier and more
+# token-intensive than the single-pass mode above.
+# Target / hard cap on how many sources the planner gathers.
+RESEARCH_DEEP_MIN_SOURCES: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_MIN_SOURCES", "50"))
+RESEARCH_DEEP_MAX_SOURCES: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_MAX_SOURCES", "80"))
+# How many per-source sub-agents run at once. Web fetches parallelize well; keep
+# this modest so OCR (in-process) and rate limits stay sane.
+RESEARCH_DEEP_CONCURRENCY: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_CONCURRENCY", "4"))
+# Turn budgets per stage: each source sub-agent fetches one source + writes one
+# note; the planner does broad discovery; synthesis reads all notes + builds.
+RESEARCH_DEEP_SOURCE_MAX_TURNS: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_SOURCE_MAX_TURNS", "20"))
+RESEARCH_DEEP_PLAN_MAX_TURNS: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_PLAN_MAX_TURNS", "60"))
+RESEARCH_DEEP_SYNTH_MAX_TURNS: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_SYNTH_MAX_TURNS", "60"))
+
 
 def _flag(name: str, default: str = "1") -> bool:
     return os.environ.get(name, default).lower() not in ("0", "false", "no", "")

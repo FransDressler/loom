@@ -7,7 +7,7 @@ import asyncio
 
 from . import config
 from .agent import build_options, run_once, run_repl, run_research
-from .research import build_research_options
+from .research import build_research_options, run_deep_research
 
 
 def main() -> None:
@@ -37,6 +37,27 @@ def main() -> None:
         metavar="PATH_OR_URL",
         help="A PDF/image (local path or URL) to OCR and include. Repeatable.",
     )
+    research.add_argument(
+        "--deep",
+        action="store_true",
+        help="Deep mode: a planner discovers many sources, a fan-out writes one note "
+        "per source, then a synthesis pass builds the Hub. Heavier + token-intensive.",
+    )
+    research.add_argument(
+        "--min-sources",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Deep mode only: target number of sources (default: ANVIL_RESEARCH_DEEP_MIN_SOURCES).",
+    )
+    research.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Deep mode only: how many source sub-agents run at once "
+        "(default: ANVIL_RESEARCH_DEEP_CONCURRENCY).",
+    )
     research.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
     research.add_argument(
         "--model",
@@ -48,8 +69,16 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "research":
-        options = build_research_options(args.vault, args.model)
         topic = " ".join(args.topic)
+        if args.deep:
+            asyncio.run(
+                run_deep_research(
+                    topic, args.source, args.vault, args.model, args.verbose,
+                    min_sources=args.min_sources, concurrency=args.concurrency,
+                )
+            )
+            return
+        options = build_research_options(args.vault, args.model)
         asyncio.run(run_research(topic, args.source, options, args.verbose))
         return
 

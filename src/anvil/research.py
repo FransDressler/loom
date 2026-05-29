@@ -14,15 +14,25 @@ so and the agent continues text-only.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import mimetypes
 import os
+import re
+import sys
 import urllib.parse
 from pathlib import Path
 
 from claude_agent_sdk import ClaudeAgentOptions, create_sdk_mcp_server, tool
 
 from . import config, figures, mathpix
-from .prompt import build_research_prompt
+from .agent import run_capture
+from .prompt import (
+    build_deep_plan_prompt,
+    build_deep_synthesis_prompt,
+    build_research_prompt,
+    build_source_note_prompt,
+)
 
 # How many documents this process has OCR'd so far — a soft cap so a runaway
 # research loop can't rack up Mathpix charges. Reset per Python process.
@@ -89,7 +99,9 @@ async def ocr_document(args: dict) -> dict:
         )
 
     try:
-        data, mime, name = _load(source)
+        # _load does blocking network/file IO; off-thread so parallel deep-mode
+        # sub-agents don't stall the shared event loop.
+        data, mime, name = await asyncio.to_thread(_load, source)
     except Exception as exc:  # noqa: BLE001 — report any load failure to the agent
         return _ok(f"Could not load {source!r}: {exc}. Skip it and continue.")
 
@@ -100,7 +112,7 @@ async def ocr_document(args: dict) -> dict:
         )
 
     try:
-        mmd = mathpix.convert(data, mime, name)
+        mmd = await asyncio.to_thread(mathpix.convert, data, mime, name)
     except mathpix.MathpixError as exc:
         return _ok(f"Mathpix failed on {name!r}: {exc}. Skip it and continue.")
 
@@ -119,7 +131,8 @@ async def ocr_document(args: dict) -> dict:
     # Localize + caption figures Mathpix returned as remote image links.
     if mmd and config.DESCRIBE_IMAGES:
         try:
-            mmd = figures.enrich_markdown(
+            mmd = await asyncio.to_thread(
+                figures.enrich_markdown,
                 mmd,
                 assets_dir=assets_dir,
                 model=config.DESCRIBE_MODEL,
@@ -140,18 +153,218 @@ def build_ocr_server():
     return create_sdk_mcp_server("anvil_ocr", tools=[ocr_document])
 
 
-def build_research_options(vault: str, model: str | None) -> ClaudeAgentOptions:
+def _research_options(
+    system_prompt: str,
+    vault: str,
+    model: str | None,
+    max_turns: int,
+    *,
+    web: bool = True,
+    ocr: bool = True,
+    write: bool = True,
+) -> ClaudeAgentOptions:
+    """Shared option builder for every research stage (single-pass and deep)."""
+    tools = ["Read", "Glob", "Grep"]
+    if write:
+        tools += ["Write", "Edit"]
+    if web:
+        tools += ["WebSearch", "WebFetch"]
+    mcp_servers: dict = {}
+    if ocr:
+        tools.append("mcp__anvil_ocr__ocr_document")
+        mcp_servers = {"anvil_ocr": build_ocr_server()}
     return ClaudeAgentOptions(
         cwd=vault,
-        system_prompt=build_research_prompt(),
-        allowed_tools=[
-            "Read", "Write", "Edit", "Glob", "Grep",
-            "WebSearch", "WebFetch",
-            "mcp__anvil_ocr__ocr_document",
-        ],
-        mcp_servers={"anvil_ocr": build_ocr_server()},
+        system_prompt=system_prompt,
+        allowed_tools=tools,
+        mcp_servers=mcp_servers,
         permission_mode="acceptEdits",
-        max_turns=config.RESEARCH_MAX_TURNS,
+        max_turns=max_turns,
         model=model or config.RESEARCH_MODEL,
         setting_sources=None,
     )
+
+
+def build_research_options(vault: str, model: str | None) -> ClaudeAgentOptions:
+    return _research_options(
+        build_research_prompt(), vault, model, config.RESEARCH_MAX_TURNS
+    )
+
+
+# --- Deep research pipeline ----------------------------------------------------
+
+def _slugify(value: str | None, fallback: str) -> str:
+    s = (value or "").strip().lower().replace(" ", "-")
+    s = re.sub(r"[^\w\-]+", "-", s, flags=re.U).strip("-._")
+    s = re.sub(r"-{2,}", "-", s)
+    return s or fallback
+
+
+def _extract_json(text: str) -> dict:
+    """Pull the planner's JSON out of its reply (fenced block or first object)."""
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if m:
+        blob = m.group(1)
+    else:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            raise ValueError("no JSON object found in planner reply")
+        blob = text[start : end + 1]
+    return json.loads(blob)
+
+
+def _prepare_sources(raw: list, max_sources: int) -> list[dict]:
+    """Dedup by URL, make slugs unique + filename-safe, cap the count."""
+    seen_urls: set[str] = set()
+    seen_slugs: set[str] = set()
+    out: list[dict] = []
+    for i, s in enumerate(raw):
+        if not isinstance(s, dict):
+            continue
+        url = (s.get("url") or "").strip()
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        slug = _slugify(s.get("slug") or s.get("title"), f"quelle-{i + 1}")
+        base, n = slug, 2
+        while slug in seen_slugs:
+            slug = f"{base}-{n}"
+            n += 1
+        seen_slugs.add(slug)
+        out.append(
+            {
+                "slug": slug,
+                "title": (s.get("title") or slug).strip(),
+                "url": url,
+                "kind": "pdf" if (s.get("kind") or "").lower() == "pdf" else "web",
+                "theme": (s.get("theme") or "Allgemein").strip(),
+                "why": (s.get("why") or "").strip(),
+            }
+        )
+        if len(out) >= max_sources:
+            break
+    return out
+
+
+def _log(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
+
+
+async def run_deep_research(
+    topic: str,
+    sources: list[str],
+    vault: str,
+    model: str | None,
+    verbose: bool,
+    *,
+    min_sources: int | None = None,
+    concurrency: int | None = None,
+) -> None:
+    """Deep research: PLAN (discover sources) -> FAN-OUT (one note each) -> SYNTHESIS.
+
+    Each stage is an independent one-shot agent. The fan-out runs source agents
+    concurrently (capped) so a 50+ source run stays reasonable wall-clock.
+    """
+    min_sources = min_sources or config.RESEARCH_DEEP_MIN_SOURCES
+    concurrency = max(1, concurrency or config.RESEARCH_DEEP_CONCURRENCY)
+    max_sources = max(min_sources, config.RESEARCH_DEEP_MAX_SOURCES)
+
+    # --- Stage 1: PLAN ---------------------------------------------------------
+    _log(f"[deep] Stufe 1/3 — Planner sucht ≥{min_sources} Quellen zu: {topic}")
+    plan_options = _research_options(
+        build_deep_plan_prompt(min_sources, max_sources),
+        vault, model, config.RESEARCH_DEEP_PLAN_MAX_TURNS,
+        web=True, ocr=False, write=False,
+    )
+    plan_prompt = f"TOPIC: {topic}"
+    if sources:
+        listed = "\n".join(f"- {s}" for s in sources)
+        plan_prompt += f"\n\nThe user supplied these sources — include them in the plan:\n{listed}"
+    plan_text = await run_capture(plan_prompt, plan_options)
+    try:
+        plan = _extract_json(plan_text)
+    except (json.JSONDecodeError, ValueError) as exc:
+        _log(f"[deep] Planner-JSON nicht lesbar ({exc}). Roh-Ausgabe:")
+        _log(plan_text[:1200])
+        return
+
+    folder = _slugify(plan.get("folder"), _slugify(topic, "research"))
+    hub_name = (plan.get("hub_name") or topic).strip()
+    themes = [t for t in (plan.get("themes") or []) if isinstance(t, str)]
+    src_list = _prepare_sources(plan.get("sources") or [], max_sources)
+    if plan.get("note"):
+        _log(f"[deep] Planner-Hinweis: {plan['note']}")
+    if not src_list:
+        _log("[deep] Keine verwertbaren Quellen im Plan — Abbruch.")
+        return
+    _log(
+        f"[deep] Plan: {len(src_list)} Quellen, {len(themes)} Themen, "
+        f"Ordner »{folder}«, Hub »{hub_name}«"
+    )
+    if verbose:
+        for s in src_list:
+            _log(f"   · [{s['theme']}] {s['title']} — {s['url']}")
+
+    # --- Stage 2: FAN-OUT ------------------------------------------------------
+    _log(f"[deep] Stufe 2/3 — {len(src_list)} Quellen werden analysiert ({concurrency} parallel)…")
+    src_options = _research_options(
+        build_source_note_prompt(),
+        vault, model, config.RESEARCH_DEEP_SOURCE_MAX_TURNS,
+        web=True, ocr=True, write=True,
+    )
+    sem = asyncio.Semaphore(concurrency)
+    done = 0
+
+    async def analyse_one(src: dict) -> dict:
+        nonlocal done
+        path = f"{folder}/{src['slug']}.md"
+        prompt = (
+            f"TOPIC: {topic}\n"
+            f"HUB note name: {hub_name}\n"
+            f"Write the note at this EXACT path: {path}\n"
+            f"Source TITLE: {src['title']}\n"
+            f"Source URL: {src['url']}\n"
+            f"Source KIND: {src['kind']}\n"
+            f"THEME: {src['theme']}\n"
+        )
+        async with sem:
+            ok = True
+            try:
+                await run_capture(prompt, src_options)
+            except Exception as exc:  # noqa: BLE001 — keep the fan-out going
+                ok = False
+                _log(f"[deep]   ✗ {src['slug']}: {exc}")
+            done += 1
+            if ok:
+                _log(f"[deep]   ✓ {done}/{len(src_list)}  {src['slug']}")
+            return {**src, "path": path, "ok": ok}
+
+    results = await asyncio.gather(*(analyse_one(s) for s in src_list))
+    written = [r for r in results if r["ok"]]
+    _log(f"[deep] {len(written)}/{len(src_list)} Quellnotizen geschrieben.")
+    if not written:
+        _log("[deep] Keine Notiz geschrieben — Synthese übersprungen.")
+        return
+
+    # --- Stage 3: SYNTHESIS ----------------------------------------------------
+    _log("[deep] Stufe 3/3 — Synthese: Hub/MOC + Querbezüge…")
+    synth_options = _research_options(
+        build_deep_synthesis_prompt(),
+        vault, model, config.RESEARCH_DEEP_SYNTH_MAX_TURNS,
+        web=False, ocr=False, write=True,
+    )
+    file_lines = "\n".join(
+        f"- {r['slug']}.md — [{r['theme']}] {r['title']}" for r in written
+    )
+    theme_lines = ", ".join(themes) if themes else "(den Notizen entnehmen)"
+    synth_prompt = (
+        f"TOPIC: {topic}\n"
+        f"Cluster folder: {folder}\n"
+        f"Hub note name to create: {hub_name}\n"
+        f"Themes: {theme_lines}\n"
+        f"Source notes already written in that folder:\n{file_lines}\n"
+    )
+    summary = await run_capture(synth_prompt, synth_options)
+    if summary:
+        print(summary, flush=True)
+    _log(f"[deep] Fertig. Cluster: {vault.rstrip('/')}/{folder}")
