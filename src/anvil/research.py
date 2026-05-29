@@ -159,7 +159,8 @@ def _research_options(
     model: str | None,
     max_turns: int,
     *,
-    web: bool = True,
+    websearch: bool = True,
+    webfetch: bool = True,
     ocr: bool = True,
     write: bool = True,
 ) -> ClaudeAgentOptions:
@@ -167,8 +168,10 @@ def _research_options(
     tools = ["Read", "Glob", "Grep"]
     if write:
         tools += ["Write", "Edit"]
-    if web:
-        tools += ["WebSearch", "WebFetch"]
+    if websearch:
+        tools.append("WebSearch")
+    if webfetch:
+        tools.append("WebFetch")
     mcp_servers: dict = {}
     if ocr:
         tools.append("mcp__anvil_ocr__ocr_document")
@@ -250,6 +253,22 @@ def _log(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
+async def _capture_with_retry(prompt: str, options, label: str, retries: int = 1) -> str:
+    """run_capture, but retry once on a transient SDK/agent failure.
+
+    The CLI sometimes exits with a generic error result (e.g. an overloaded API
+    or a dropped connection mid-turn); a single retry usually clears it.
+    """
+    for attempt in range(retries + 1):
+        try:
+            return await run_capture(prompt, options)
+        except Exception as exc:  # noqa: BLE001 — retry then surface
+            if attempt < retries:
+                _log(f"[deep] {label} fehlgeschlagen ({exc}) — neuer Versuch…")
+                continue
+            raise
+
+
 async def run_deep_research(
     topic: str,
     sources: list[str],
@@ -274,13 +293,18 @@ async def run_deep_research(
     plan_options = _research_options(
         build_deep_plan_prompt(min_sources, max_sources),
         vault, model, config.RESEARCH_DEEP_PLAN_MAX_TURNS,
-        web=True, ocr=False, write=False,
+        websearch=True, webfetch=False, ocr=False, write=False,
     )
     plan_prompt = f"TOPIC: {topic}"
     if sources:
         listed = "\n".join(f"- {s}" for s in sources)
         plan_prompt += f"\n\nThe user supplied these sources — include them in the plan:\n{listed}"
-    plan_text = await run_capture(plan_prompt, plan_options)
+    try:
+        plan_text = await _capture_with_retry(plan_prompt, plan_options, "Planner")
+    except Exception as exc:  # noqa: BLE001 — surface cleanly, no traceback
+        _log(f"[deep] Planner abgebrochen: {exc}")
+        _log("[deep] Tipp: kleiner anfangen (z.B. --min-sources 15) und erneut versuchen.")
+        return
     try:
         plan = _extract_json(plan_text)
     except (json.JSONDecodeError, ValueError) as exc:
@@ -310,7 +334,7 @@ async def run_deep_research(
     src_options = _research_options(
         build_source_note_prompt(),
         vault, model, config.RESEARCH_DEEP_SOURCE_MAX_TURNS,
-        web=True, ocr=True, write=True,
+        ocr=True, write=True,
     )
     sem = asyncio.Semaphore(concurrency)
     done = 0
@@ -351,7 +375,7 @@ async def run_deep_research(
     synth_options = _research_options(
         build_deep_synthesis_prompt(),
         vault, model, config.RESEARCH_DEEP_SYNTH_MAX_TURNS,
-        web=False, ocr=False, write=True,
+        websearch=False, webfetch=False, ocr=False, write=True,
     )
     file_lines = "\n".join(
         f"- {r['slug']}.md — [{r['theme']}] {r['title']}" for r in written
@@ -364,7 +388,12 @@ async def run_deep_research(
         f"Themes: {theme_lines}\n"
         f"Source notes already written in that folder:\n{file_lines}\n"
     )
-    summary = await run_capture(synth_prompt, synth_options)
+    try:
+        summary = await _capture_with_retry(synth_prompt, synth_options, "Synthese")
+    except Exception as exc:  # noqa: BLE001 — notes are safe even if synthesis fails
+        _log(f"[deep] Synthese fehlgeschlagen: {exc}")
+        _log(f"[deep] Die {len(written)} Quellnotizen sind aber geschrieben in {folder}/.")
+        return
     if summary:
         print(summary, flush=True)
     _log(f"[deep] Fertig. Cluster: {vault.rstrip('/')}/{folder}")
