@@ -27,7 +27,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from . import cleaner, config, figures, mathpix
+from . import cleaner, config, figures, mathpix, mdconvert
 from .agent import build_options, run_capture
 
 # Prefix on every confirmation ANVIL sends back, so the next poll recognises its
@@ -171,6 +171,19 @@ def _document_attachments(msg: dict) -> list[dict]:
     return docs
 
 
+def _media_attachments(msg: dict) -> list[dict]:
+    """Attachments MarkItDown should convert (audio, EPub) — not Mathpix's job."""
+    docs = []
+    for att in msg.get("attachments") or []:
+        if att.get("isSticker"):
+            continue
+        if (att.get("totalBytes") or 0) == 0:
+            continue
+        if mdconvert.supports_attachment(att.get("mimeType") or ""):
+            docs.append(att)
+    return docs
+
+
 # --- replies & attachments -----------------------------------------------------
 
 def _reply(chat: str, message: str) -> None:
@@ -244,6 +257,63 @@ def _capture_document(att: dict, caption: str, options, verbose: bool) -> str:
     return asyncio.run(run_capture(prompt, options))
 
 
+def _file_markdown(
+    label: str, source_name: str, source_ref: str, md_text: str,
+    caption: str, embed: str | None, options,
+) -> str:
+    """Have the agent file MarkItDown output (transcript/article/book) as a note."""
+    if len(md_text) > config.MARKITDOWN_MAX_CHARS:
+        md_text = md_text[: config.MARKITDOWN_MAX_CHARS] + "\n\n…(gekürzt)"
+    embed_line = (
+        f"Die Originaldatei liegt bereits im Vault unter »{config.DOC_ASSET_DIR}/{embed}«; "
+        f"binde sie in die Notiz ein mit ![[{embed}]]. "
+        if embed
+        else ""
+    )
+    caption_line = f"Mein Begleittext dazu: »{caption}«. " if caption else ""
+    prompt = (
+        f"Ich habe {label} per iMessage geschickt: »{source_name}«. "
+        f"Es wurde zu Markdown umgewandelt (Inhalt/Transkript unten). "
+        f"Quelle: {source_ref}. "
+        + embed_line
+        + caption_line
+        + "Lege den Inhalt als neue Notiz an: wähle einen passenden Titel und Ablageort, "
+        "strukturiere und fasse den Inhalt sinnvoll zusammen (das Wesentliche erhalten, "
+        "nicht stumpf 1:1 kopieren), ergänze Frontmatter und sinnvolle Tags, verlinke mit "
+        "verwandten Notizen, und vermerke die Quelle in der Notiz.\n\n"
+        "--- Inhalt (MarkItDown) ---\n" + md_text
+    )
+    return asyncio.run(run_capture(prompt, options))
+
+
+def _capture_media(att: dict, caption: str, options, verbose: bool) -> str:
+    """Convert one audio/EPub attachment via MarkItDown and file it into the vault."""
+    guid = att.get("guid") or ""
+    mime = (att.get("mimeType") or "").lower()
+    name = att.get("transferName") or f"attachment-{guid[:8] or 'file'}"
+    kind = mdconvert.kind_of(mime)
+
+    if verbose:
+        print(f"MarkItDown {kind}: {name!r} ({mime})", file=sys.stderr, flush=True)
+
+    data = download_attachment(guid)
+    md_text = mdconvert.convert_bytes(data, mime, name)
+    asset_name = _store_asset(name, guid, data)
+    label = {"audio": "eine Audiodatei", "epub": "ein EPub"}.get(kind, "eine Datei")
+    return _file_markdown(label, name, name, md_text, caption, asset_name, options)
+
+
+def _capture_url(url: str, text: str, options, verbose: bool) -> str:
+    """Fetch a texted-in link (YouTube/web) via MarkItDown and file it into the vault."""
+    if verbose:
+        print(f"MarkItDown URL: {url}", file=sys.stderr, flush=True)
+    md_text = mdconvert.convert_url(url)
+    caption = (text or "").replace(url, "").strip()
+    is_yt = "youtube.com" in url or "youtu.be" in url
+    label = "ein YouTube-Video" if is_yt else "einen Link"
+    return _file_markdown(label, url, url, md_text, caption, None, options)
+
+
 # --- poll ----------------------------------------------------------------------
 
 def poll(verbose: bool = False) -> int:
@@ -278,33 +348,66 @@ def poll(verbose: bool = False) -> int:
             continue
 
         docs = _document_attachments(msg)
-        if docs and not mathpix.is_configured():
-            _reply(chat, "Mathpix ist nicht konfiguriert — Dokument übersprungen.")
+        media = _media_attachments(msg) if config.MARKITDOWN else []
+        handled_attachment = False
+
+        # Images / PDFs -> Mathpix OCR.
+        for att in docs:
+            if not mathpix.is_configured():
+                _reply(chat, "Mathpix ist nicht konfiguriert — Dokument übersprungen.")
+                break
+            try:
+                reply = _capture_document(att, text, options, verbose)
+            except (BlueBubblesError, mathpix.MathpixError) as exc:
+                print(f"document capture failed: {exc}", file=sys.stderr, flush=True)
+                _reply(chat, f"⚠️ {att.get('transferName') or 'Dokument'}: {exc}")
+                continue
+            captured += 1
+            handled_attachment = True
+            _reply(chat, reply)
+
+        # Audio / EPub -> MarkItDown.
+        for att in media:
+            try:
+                reply = _capture_media(att, text, options, verbose)
+            except (BlueBubblesError, mdconvert.MarkItDownError) as exc:
+                print(f"media capture failed: {exc}", file=sys.stderr, flush=True)
+                _reply(chat, f"⚠️ {att.get('transferName') or 'Datei'}: {exc}")
+                continue
+            captured += 1
+            handled_attachment = True
+            _reply(chat, reply)
+
+        if handled_attachment or not text:
             continue
 
-        if docs:
-            for att in docs:
-                try:
-                    reply = _capture_document(att, text, options, verbose)
-                except (BlueBubblesError, mathpix.MathpixError) as exc:
-                    print(f"document capture failed: {exc}", file=sys.stderr, flush=True)
-                    _reply(chat, f"⚠️ {att.get('transferName') or 'Dokument'}: {exc}")
-                    continue
+        # A reply to a pending cleaner proposal ("1 3" / "alle" / "keine") is
+        # consumed here instead of being captured as a new note.
+        handled, summary = cleaner.try_resolve(text)
+        if handled:
+            _reply(chat, summary)
+            captured += 1
+            continue
+
+        # A texted-in link -> fetch via MarkItDown (YouTube transcript / article)
+        # and file the content, rather than saving a bare URL. Falls back to a
+        # normal text capture if the conversion fails.
+        url = mdconvert.find_url(text) if (config.MARKITDOWN and config.MARKITDOWN_URLS) else None
+        if url:
+            try:
+                reply = _capture_url(url, text, options, verbose)
                 captured += 1
                 _reply(chat, reply)
-        elif text:
-            # A reply to a pending cleaner proposal ("1 3" / "alle" / "keine") is
-            # consumed here instead of being captured as a new note.
-            handled, summary = cleaner.try_resolve(text)
-            if handled:
-                _reply(chat, summary)
-                captured += 1
                 continue
-            if verbose:
-                print(f"capturing: {text[:80]!r}", file=sys.stderr, flush=True)
-            reply = asyncio.run(run_capture(text, options))
-            captured += 1
-            _reply(chat, reply)
+            except mdconvert.MarkItDownError as exc:
+                if verbose:
+                    print(f"url convert failed ({exc}); capturing as text", file=sys.stderr, flush=True)
+
+        if verbose:
+            print(f"capturing: {text[:80]!r}", file=sys.stderr, flush=True)
+        reply = asyncio.run(run_capture(text, options))
+        captured += 1
+        _reply(chat, reply)
 
     state[chat] = {"last_ts": last_ts, "seen": seen[-SEEN_LIMIT:]}
     _save_state(state)

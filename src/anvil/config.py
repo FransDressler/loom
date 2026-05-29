@@ -86,6 +86,17 @@ def _flag(name: str, default: str = "1") -> bool:
     return os.environ.get(name, default).lower() not in ("0", "false", "no", "")
 
 
+# --- MarkItDown (links, audio, EPub via Microsoft's open-source markitdown) -----
+# Complements Mathpix: audio attachments are transcribed, EPub attachments are
+# read, and (when MARKITDOWN_URLS is on) a plain http(s) link you text in is
+# fetched — YouTube as a transcript, web pages as article Markdown — and filed
+# instead of being saved as a bare URL. On by default.
+MARKITDOWN: bool = _flag("ANVIL_MARKITDOWN")
+MARKITDOWN_URLS: bool = _flag("ANVIL_MARKITDOWN_URLS")
+# Cap the converted text handed to the agent (a whole EPub can be enormous).
+MARKITDOWN_MAX_CHARS: int = int(os.environ.get("ANVIL_MARKITDOWN_MAX_CHARS", "80000"))
+
+
 # --- Daily vault cleaner -------------------------------------------------------
 # A once-a-day pass that (1) gardens the vault non-destructively via the ANVIL
 # agent and (2) proposes clutter for deletion, asking via iMessage before
