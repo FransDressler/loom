@@ -15,6 +15,51 @@ STATE_DIR: str = os.environ.get(
     "ANVIL_STATE_DIR", os.path.expanduser("~/.local/state/anvil")
 )
 
+# --- Vault network folders (orchestrator / agent-network layer) ----------------
+# The vault doubles as the message bus and logbook for the agent network:
+#   inbox/   raw incoming events (mail, GitHub notifications) filed as notes
+#   tasks/   open work items agents pick up and resolve
+#   reports/ generated reports & audit logs (daily briefing, action audit)
+# Paths are relative to the vault root; agents read/write here instead of any
+# external queue. Override the names if they clash with existing folders.
+INBOX_DIR: str = os.environ.get("ANVIL_INBOX_DIR", "inbox")
+TASKS_DIR: str = os.environ.get("ANVIL_TASKS_DIR", "tasks")
+REPORTS_DIR: str = os.environ.get("ANVIL_REPORTS_DIR", "reports")
+
+# --- Propose-and-confirm (confirm.py) ------------------------------------------
+# Outward/irreversible actions (delete note, send mail, merge PR, create event)
+# are queued and confirmed via iMessage before running. How long a pending
+# proposal stays answerable before a poll ignores it (hours). Falls back to the
+# cleaner's TTL so existing setups keep their tuned value.
+CONFIRM_PENDING_TTL_H: int = int(
+    os.environ.get(
+        "ANVIL_CONFIRM_PENDING_TTL_H",
+        os.environ.get("ANVIL_CLEANER_PENDING_TTL_H", "48"),
+    )
+)
+
+# A vault-resident schema/conventions note (Karpathy "LLM Wiki" idea-file style).
+# It documents how this vault is organised — folders, naming, frontmatter, linking,
+# the raw->wiki model — and is the authoritative convention source. ANVIL reads it
+# into every agent's system prompt and keeps it current; `anvil schema` (re)builds
+# it by surveying the vault. Path is relative to the vault root.
+SCHEMA_FILE: str = os.environ.get("ANVIL_SCHEMA_FILE", "ANVIL — Schema & Konventionen.md")
+
+# A vault-resident digest note: a single at-a-glance overview of the whole wiki
+# (areas, MOCs, key counts) plus a rolling "recently changed" section. ANVIL
+# (re)builds it via `anvil digest`. Like the schema note it is a protected system
+# note. Path is relative to the vault root.
+DIGEST_FILE: str = os.environ.get("ANVIL_DIGEST_FILE", "ANVIL — Digest.md")
+
+# A vault-resident glossary / controlled vocabulary: clusters of equivalent terms
+# (synonyms + cross-language translations, treated as equal — no preferred form)
+# per concept, plus a canonical tag token per concept. ANVIL reads it into every
+# agent run to (a) expand search terms at recall and (b) unify tags + add Obsidian
+# `aliases:` at capture/normalize, so retrieval no longer fails on wording/language.
+# `anvil glossary` builds/refreshes it; `anvil normalize` applies it to notes.
+# Protected system note. Path is relative to the vault root.
+GLOSSARY_FILE: str = os.environ.get("ANVIL_GLOSSARY_FILE", "ANVIL — Glossar & Synonyme.md")
+
 # --- iMessage inbox via a BlueBubbles relay on a Mac ---------------------------
 # BlueBubbles (https://bluebubbles.app) runs a small server on a Mac with an
 # Apple ID signed into Messages, and exposes a REST API. ANVIL polls it.
@@ -90,6 +135,34 @@ def _flag(name: str, default: str = "1") -> bool:
     return os.environ.get(name, default).lower() not in ("0", "false", "no", "")
 
 
+# --- Deep research: concept/wiki layer (raw -> wiki) ---------------------------
+# Deep research keeps a two-layer structure, Karpathy "LLM Wiki" style. The RAW
+# layer (one subfolder per cluster) is the immutable source of truth and holds,
+# per source: the raw fetched Markdown (<slug>.quelle.md) plus the extraction
+# note (<slug>.md). A WIKI layer of concept/entity notes is then synthesized
+# ACROSS sources and folded into existing vault notes, citing the source notes.
+# Subfolder (inside the cluster folder) that holds the raw layer.
+RESEARCH_DEEP_RAW_SUBDIR: str = os.environ.get("ANVIL_RESEARCH_DEEP_RAW_SUBDIR", "raw")
+# Store each source's raw Markdown deterministically (via mdconvert/mathpix)
+# alongside its note, so the cluster can be re-synthesized from raw later.
+RESEARCH_DEEP_STORE_RAW: bool = _flag("ANVIL_RESEARCH_DEEP_STORE_RAW")
+# Raw Markdown is capped at MARKITDOWN_MAX_CHARS (see below) when written.
+# How many concept/entity notes the concept-plan stage aims for.
+RESEARCH_DEEP_CONCEPT_MIN: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_CONCEPT_MIN", "8"))
+RESEARCH_DEEP_CONCEPT_MAX: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_CONCEPT_MAX", "25"))
+# How many per-concept sub-agents run at once (defaults to the source concurrency).
+RESEARCH_DEEP_CONCEPT_CONCURRENCY: int = int(
+    os.environ.get("ANVIL_RESEARCH_DEEP_CONCEPT_CONCURRENCY", str(RESEARCH_DEEP_CONCURRENCY))
+)
+# Turn budgets: concept-plan skims the source notes; each concept agent reads a
+# handful of source notes + writes/updates one note; integrate builds the Hub.
+RESEARCH_DEEP_CONCEPT_PLAN_MAX_TURNS: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_CONCEPT_PLAN_MAX_TURNS", "60"))
+RESEARCH_DEEP_CONCEPT_MAX_TURNS: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_CONCEPT_MAX_TURNS", "30"))
+RESEARCH_DEEP_INTEGRATE_MAX_TURNS: int = int(
+    os.environ.get("ANVIL_RESEARCH_DEEP_INTEGRATE_MAX_TURNS", str(RESEARCH_DEEP_SYNTH_MAX_TURNS))
+)
+
+
 # --- MarkItDown (links, audio, EPub via Microsoft's open-source markitdown) -----
 # Complements Mathpix: audio attachments are transcribed, EPub attachments are
 # read, and (when MARKITDOWN_URLS is on) a plain http(s) link you text in is
@@ -123,6 +196,33 @@ CLEANER_MAX_CANDIDATES: int = int(os.environ.get("ANVIL_CLEANER_MAX_CANDIDATES",
 CLEANER_USE_TRASH: bool = _flag("ANVIL_CLEANER_USE_TRASH")
 # How long a pending proposal stays answerable before a poll ignores it (hours).
 CLEANER_PENDING_TTL_H: int = int(os.environ.get("ANVIL_CLEANER_PENDING_TTL_H", "48"))
+
+# Fold-in: after gardening, fold recently-added loose root notes into the concept
+# wiki (reusing the deep-research concept-note path) so captures compound over
+# time instead of piling up as isolated notes. On by default.
+CLEANER_FOLDIN: bool = _flag("ANVIL_CLEANER_FOLDIN")
+# Only consider loose notes modified within this many days (keeps the pass cheap).
+CLEANER_FOLDIN_MAX_AGE_DAYS: int = int(os.environ.get("ANVIL_CLEANER_FOLDIN_MAX_AGE_DAYS", "3"))
+# Turn budget for the fold-in agent pass.
+CLEANER_FOLDIN_MAX_TURNS: int = int(os.environ.get("ANVIL_CLEANER_FOLDIN_MAX_TURNS", "30"))
+
+# Lint: a wiki-consistency pass (broken [[links]], dangling citations, missing
+# frontmatter, orphans) that fixes the safe cases and reports the rest. Digest:
+# (re)build the at-a-glance overview note. Both run in the daily cleaner by
+# default and are available standalone as `anvil lint` / `anvil digest`.
+CLEANER_LINT: bool = _flag("ANVIL_CLEANER_LINT")
+CLEANER_LINT_MAX_TURNS: int = int(os.environ.get("ANVIL_CLEANER_LINT_MAX_TURNS", "40"))
+CLEANER_DIGEST: bool = _flag("ANVIL_CLEANER_DIGEST")
+CLEANER_DIGEST_MAX_TURNS: int = int(os.environ.get("ANVIL_CLEANER_DIGEST_MAX_TURNS", "30"))
+# "Recently changed" window the digest summarises (days).
+DIGEST_RECENT_DAYS: int = int(os.environ.get("ANVIL_DIGEST_RECENT_DAYS", "7"))
+
+# Normalize: apply the glossary to notes — add Obsidian `aliases:` (synonyms/
+# translations) and unify tags to the canonical token. Runs incrementally in the
+# daily cleaner over recently-changed notes (reusing CLEANER_FOLDIN_MAX_AGE_DAYS);
+# `anvil normalize [--all]` does an on-demand sweep.
+CLEANER_NORMALIZE: bool = _flag("ANVIL_CLEANER_NORMALIZE")
+CLEANER_NORMALIZE_MAX_TURNS: int = int(os.environ.get("ANVIL_CLEANER_NORMALIZE_MAX_TURNS", "40"))
 
 
 # --- Web chat front-end --------------------------------------------------------

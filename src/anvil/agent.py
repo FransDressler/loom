@@ -23,11 +23,27 @@ RESET = "\033[0m"
 ALLOWED_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"]
 
 
-def build_options(vault: str, model: str | None) -> ClaudeAgentOptions:
+def build_options(
+    vault: str,
+    model: str | None,
+    *,
+    extra_tools: list[str] | None = None,
+    mcp_servers: dict | None = None,
+) -> ClaudeAgentOptions:
+    """Build the everyday agent options, optionally with extra (MCP) tools.
+
+    `extra_tools` are appended to ALLOWED_TOOLS — pass the fully-qualified MCP
+    tool names (e.g. "mcp__anvil_github__gh_list_issues") so the network agent
+    may call integration tools. `mcp_servers` maps server name -> the object from
+    create_sdk_mcp_server (see research.build_ocr_server / anvil.mcp). Mirrors the
+    builder in research._research_options so all modes wire MCP the same way.
+    """
+    tools = ALLOWED_TOOLS + list(extra_tools or [])
     return ClaudeAgentOptions(
         cwd=vault,
         system_prompt=build_system_prompt(),
-        allowed_tools=ALLOWED_TOOLS,
+        allowed_tools=tools,
+        mcp_servers=mcp_servers or {},
         # Auto-accept file edits so captures don't prompt every turn; the agent is
         # scoped to the vault via cwd and the system prompt.
         permission_mode="acceptEdits",

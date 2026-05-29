@@ -27,8 +27,11 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from . import cleaner, config, figures, mathpix, mdconvert
+from . import cleaner, config, confirm, figures, mathpix, mdconvert
 from .agent import build_options, run_capture
+
+# Importing cleaner registers its delete_note handler with confirm, so a pending
+# deletion proposal can be resolved here via confirm.try_resolve.
 
 # Prefix on every confirmation ANVIL sends back, so the next poll recognises its
 # own messages and never captures or loops on them.
@@ -152,7 +155,9 @@ def _is_noise(msg: dict, text: str) -> bool:
         return True
     if text.startswith(CONFIRM_PREFIX):  # our own confirmation / warning
         return True
-    if text.startswith(cleaner.PROPOSAL_PREFIX):  # our own cleaner proposal
+    if text.startswith(confirm.PROPOSAL_PREFIX):  # our own confirm proposal
+        return True
+    if text.startswith(cleaner.PROPOSAL_PREFIX):  # legacy/local cleaner proposal header
         return True
     return False
 
@@ -381,9 +386,10 @@ def poll(verbose: bool = False) -> int:
         if handled_attachment or not text:
             continue
 
-        # A reply to a pending cleaner proposal ("1 3" / "alle" / "keine") is
-        # consumed here instead of being captured as a new note.
-        handled, summary = cleaner.try_resolve(text)
+        # A reply to a pending confirm proposal ("1 3" / "alle" / "keine") —
+        # deletions, and later mail/GitHub/calendar actions — is consumed here
+        # and executed via its registered handler instead of captured as a note.
+        handled, summary = confirm.try_resolve(text)
         if handled:
             _reply(chat, summary)
             captured += 1
