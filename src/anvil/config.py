@@ -69,9 +69,13 @@ RESEARCH_MAX_PDFS: int = int(os.environ.get("ANVIL_RESEARCH_MAX_PDFS", "10"))
 # A planner discovers many sources, a fan-out of sub-agents writes one note per
 # source, then a synthesis pass builds the Hub/MOC. Much heavier and more
 # token-intensive than the single-pass mode above.
-# Target / hard cap on how many sources the planner gathers.
-RESEARCH_DEEP_MIN_SOURCES: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_MIN_SOURCES", "50"))
-RESEARCH_DEEP_MAX_SOURCES: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_MAX_SOURCES", "80"))
+# Target / hard cap on how many sources the planner gathers. Kept modest: the
+# planner is a single agent call that must run many WebSearches and then emit one
+# JSON blob for every source. Asking for 50+ in one call reliably runs into turn
+# and rate limits and the CLI aborts the run (is_error with subtype "success").
+# Raise via the env vars for a deeper run if your account's limits allow it.
+RESEARCH_DEEP_MIN_SOURCES: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_MIN_SOURCES", "15"))
+RESEARCH_DEEP_MAX_SOURCES: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_MAX_SOURCES", "30"))
 # How many per-source sub-agents run at once. Web fetches parallelize well; keep
 # this modest so OCR (in-process) and rate limits stay sane.
 RESEARCH_DEEP_CONCURRENCY: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_CONCURRENCY", "4"))
