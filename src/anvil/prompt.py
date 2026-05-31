@@ -195,11 +195,19 @@ already-fetched content. Analyse THAT ONE source and write EXACTLY ONE note for 
    ## Kernergebnisse          (bullet points of the concrete findings / data / arguments)
    ## Methodik & Einordnung   (how credible/strong is it; study design, sample, limits)
    ## Relevanz fürs Thema     (what it contributes to "<topic>")
+   ## Abbildungen             (only if the RAW file actually embeds real source figures)
    ## Quelle
    - [<title>](<url>)
    If a RAW path was given, add the line `Rohquelle: [[<raw-basename-without-.md>]]` so the
    note links to its raw source. End the note body with a backlink line: [[<hub_name>]]
-3. Write the note in the language of the source's content (mostly German for this vault).
+3. ABBILDUNGEN: the RAW file may already contain localized figures as Obsidian embeds
+   `![[datei.jpg]]` (often followed by `*Abb.: …*`). If so, carry the 1–3 MOST telling REAL
+   figures (photos, plots, micrographs, scans) into the `## Abbildungen` section: copy each
+   `![[datei.jpg]]` embed VERBATIM (use the filename EXACTLY as in the RAW file — never invent
+   one) and give it a one-line German caption `*Abb.: …*`. Skip purely decorative images,
+   logos, and schematic/diagram drawings; do NOT create ```mermaid``` or other diagrams. If
+   the RAW file embeds no real figures, omit the `## Abbildungen` section entirely.
+4. Write the note in the language of the source's content (mostly German for this vault).
    Synthesize in your own words — do not copy-paste large blocks. Don't invent findings.
 
 # Hard limits
@@ -267,27 +275,47 @@ SOURCE NOTES that support it (their exact paths), a target WIKI PATH, an EXISTIN
 the web.
 
 1. READ each supporting source note (the exact paths given). They already contain the
-   extracted findings; build on them. If a `*.quelle.md` raw file sits next to a source note
-   you may Read it for a detail, but you do not have to.
-2. WRITE the concept note:
+   extracted findings; build on them. They may also carry real figures under a `## Abbildungen`
+   heading as Obsidian embeds `![[datei.jpg]]` — note which ones are available to reuse. If a
+   `*.quelle.md` raw file sits next to a source note you may Read it for a detail, but you do
+   not have to.
+2. WRITE the concept note like a real encyclopedia article (it renders in vanilla Obsidian):
    - If an EXISTING NOTE is given: open it and FOLD the synthesis in SURGICALLY — append a
-     `## <Concept-Title> — Forschungsstand` section (or merge into an existing matching
-     section). NEVER overwrite or wipe the file; preserve language, headings, and formatting.
+     `## <Concept-Title> — Forschungsstand` section (or merge into a matching one), optionally
+     with ONE telling figure embed. NEVER overwrite or wipe the file; preserve language,
+     headings, and formatting.
    - Else (or if UPDATE is set and the target already exists): write/update the note at the
-     target WIKI PATH with this structure:
+     target WIKI PATH with these elements IN THIS ORDER:
      ---
      created: {today}
      tags: [konzept]
      aliases: []
      ---
      # <Concept/Entity Title>
-     ## Worum es geht       (1–3 sentences defining the concept/entity)
-     ## Synthese            (cross-source synthesis: consensus, tensions, strongest evidence)
-     ## Belege              (bullets; each cites its source with [[source-slug]])
-     ## Querbezüge          ([[other concept]] / [[existing vault note]] links where relevant)
+     > [!info] Steckbrief   (a fact panel: 3–6 `**Feld:** Wert` lines — e.g. Art, zentrale
+     >                       Kennzahl/Eigenschaft, Schlüsselquellen as [[source-slug]]. NO prose
+     >                       sentences. Omit the whole callout only if there are no crisp facts.)
+     ![[<lead-figure>|420]]   (the single most telling REAL figure from the source notes, as a
+     *Abb.: <Bildunterschrift>*   lead image with a German caption — omit if none is available)
+     ## Worum es geht   (Lead: 2 short paragraphs — a self-contained summary of the whole topic)
+     ## Synthese        (cross-source synthesis: consensus, tensions, strongest evidence; place
+                         any FURTHER figures HERE in the relevant spot, each with `*Abb.: …*`)
+     ## Daten / Vergleich   (OPTIONAL: ONE Markdown table when platforms/numbers/options compare)
+     ## Belege          (SHORT atomic claim→[[source-slug]] pairs — not a re-narration of Synthese)
+     ## Querbezüge      (links to OTHER notes — sibling concepts, the Hub, existing vault notes;
+                         NOT a repeat of the cited sources)
      End with a citations line: `Quellen: [[source-slug-a]] · [[source-slug-b]] …`
    - If UPDATE is set, revise the existing concept note in place — do NOT duplicate it.
-3. Write in the content's language (mostly German). Synthesize in your own words; cite, don't
+3. ABBILDUNGEN: reuse 1–3 of the MOST telling REAL figures from the source notes' `## Abbildungen`.
+   Copy each `![[datei.jpg]]` embed VERBATIM — use the filename EXACTLY as written, NEVER invent
+   one. The LEAD image should depict the PRIMARY thing the title names (a structure/schematic of
+   the concept itself), NOT a result or benchmark plot from a single source — put result/experiment
+   figures in `## Synthese`, each next to the prose that discusses their source. Give every figure a
+   one-line German caption `*Abb.: …*` that says what is SHOWN (don't just restate a body sentence).
+   Skip logos and purely decorative images; reuse the sources' OWN figures only — do NOT generate
+   ```mermaid``` blocks or any new diagram. If the source notes embed no real figures, omit images
+   entirely — the note is complete without them (same for the Steckbrief).
+4. Write in the content's language (mostly German). Synthesize in your own words; cite, don't
    copy. Keep math as $…$ / $$…$$.
 
 # Hard limits
@@ -359,9 +387,12 @@ anpassen — ANVIL folgt deinen Änderungen.
 ## Raw → Wiki (Deep Research)
 - Ein Deep-Research-Cluster liegt in einem eigenen Themenordner.
 - `<cluster>/raw/` ist die unveränderliche Roh-Ebene: pro Quelle `<slug>.quelle.md`
-  (volle Markdown) und `<slug>.md` (Quellnotiz, abgeleitet).
-- Darüber die Wiki-Ebene: Konzept-/Entity-Notizen, die über Quellen synthetisieren und in
-  bestehende Notizen eingefaltet werden; ein Hub/MOC bündelt die Konzepte des Clusters.
+  (volle Markdown, echte Quellbilder lokal als `![[…]]` eingebettet) und `<slug>.md`
+  (Quellnotiz, abgeleitet, mit `## Abbildungen` für die wichtigsten Quellbilder). Original-
+  PDFs liegen unter `attachments/` und werden in der Roh-Notiz als `original:` vermerkt.
+- Darüber die Wiki-Ebene: Konzept-/Entity-Notizen im Enzyklopädie-Stil (Steckbrief-Callout,
+  Lead-Bild, Abbildungen im jeweiligen Abschnitt, optionale Vergleichstabelle), die über
+  Quellen synthetisieren und in bestehende Notizen eingefaltet werden; ein Hub/MOC bündelt sie.
 
 ## Agentennetzwerk (Bus & Logbuch)
 Der Vault ist auch der Nachrichten-Bus und das Logbuch des Agentennetzwerks. Diese Ordner

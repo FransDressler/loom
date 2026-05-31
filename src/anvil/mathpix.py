@@ -11,11 +11,14 @@ Uses only urllib so the package stays dependency-free, matching imessage.py.
 from __future__ import annotations
 
 import base64
+import io
 import json
+import os
 import time
 import urllib.error
 import urllib.request
 import uuid
+import zipfile
 
 from . import config
 
@@ -39,6 +42,11 @@ _MATH_OPTIONS = {
     "rm_spaces": True,
 }
 _POLL_INTERVAL = 3  # seconds between PDF status checks
+
+# Figure file extensions Mathpix packs into the `md.zip` images/ folder.
+_FIG_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+# Guard against a pathological archive: stop reading once the figures exceed this.
+_ZIP_MAX_BYTES = 200 * 1024 * 1024
 
 
 class MathpixError(RuntimeError):
@@ -97,11 +105,15 @@ def _get_json(path: str) -> dict:
 
 
 def _get_text(path: str) -> str:
+    return _get_bytes(path).decode(errors="replace")
+
+
+def _get_bytes(path: str) -> bytes:
     url = f"{config.MATHPIX_URL.rstrip('/')}{path}"
     req = urllib.request.Request(url, method="GET")
     for key, value in _auth_headers().items():
         req.add_header(key, value)
-    return _open(req).decode(errors="replace")
+    return _open(req)
 
 
 def _multipart(file_field: str, filename: str, file_bytes: bytes, fields: dict[str, str]) -> tuple[bytes, str]:
@@ -131,11 +143,11 @@ def ocr_image(data: bytes, mime: str) -> str:
     return (resp.get("text") or "").strip()
 
 
-def ocr_pdf(data: bytes, filename: str) -> str:
-    """Upload a PDF, wait for the async job, return its Mathpix Markdown."""
-    options = json.dumps(_MATH_OPTIONS)
-    payload, content_type = _multipart("file", filename or "document.pdf", data, {"options_json": options})
-
+def _submit_pdf(data: bytes, filename: str, options: dict) -> str:
+    """POST a PDF to the async /v3/pdf endpoint and return its pdf_id."""
+    payload, content_type = _multipart(
+        "file", filename or "document.pdf", data, {"options_json": json.dumps(options)}
+    )
     url = f"{config.MATHPIX_URL.rstrip('/')}/v3/pdf"
     req = urllib.request.Request(url, data=payload, method="POST")
     for key, value in _auth_headers().items():
@@ -149,20 +161,74 @@ def ocr_pdf(data: bytes, filename: str) -> str:
     pdf_id = resp.get("pdf_id")
     if not pdf_id:
         raise MathpixError(f"Mathpix did not return a pdf_id: {resp.get('error') or resp}")
+    return pdf_id
 
+
+def _wait_pdf(pdf_id: str) -> None:
+    """Poll a PDF job until it is completed (raise on error/timeout)."""
     deadline = time.monotonic() + config.MATHPIX_PDF_TIMEOUT
     while True:
         status = _get_json(f"/v3/pdf/{pdf_id}")
         state = status.get("status")
         if state == "completed":
-            break
+            return
         if state == "error":
             raise MathpixError(f"Mathpix PDF conversion failed: {status.get('error') or status}")
         if time.monotonic() > deadline:
             raise MathpixError(f"Mathpix PDF conversion timed out after {config.MATHPIX_PDF_TIMEOUT}s (status: {state}).")
         time.sleep(_POLL_INTERVAL)
 
+
+def ocr_pdf(data: bytes, filename: str) -> str:
+    """Upload a PDF, wait for the async job, return its Mathpix Markdown (text only)."""
+    pdf_id = _submit_pdf(data, filename or "document.pdf", _MATH_OPTIONS)
+    _wait_pdf(pdf_id)
     return _get_text(f"/v3/pdf/{pdf_id}.mmd").strip()
+
+
+def ocr_pdf_with_figures(data: bytes, filename: str) -> tuple[str, dict[str, bytes]]:
+    """Like ocr_pdf but ask Mathpix for `md.zip`, which bundles the Markdown plus an
+    `images/` folder of cropped figures. Returns (markdown, {figure_basename: bytes});
+    the figure map may be empty when the document has no extractable figures.
+
+    The Markdown references figures as `![](images/<name>)`; the caller localizes
+    those into the vault via `figures.embed_local_figures`.
+    """
+    options = {**_MATH_OPTIONS, "conversion_formats": {"md.zip": True}}
+    pdf_id = _submit_pdf(data, filename or "document.pdf", options)
+    _wait_pdf(pdf_id)
+    # The md.zip conversion stage can lag the base job's `completed` status; retry the
+    # download a few times before giving up rather than losing the figures.
+    for attempt in range(3):
+        try:
+            return _unpack_md_zip(_get_bytes(f"/v3/pdf/{pdf_id}.md.zip"))
+        except MathpixError:
+            if attempt == 2:
+                raise
+            time.sleep(_POLL_INTERVAL)
+
+
+def _unpack_md_zip(zip_bytes: bytes) -> tuple[str, dict[str, bytes]]:
+    """Split a Mathpix `md.zip` into (markdown, {figure_basename: bytes}).
+
+    Figures are keyed by basename only (never by their in-archive path), so the
+    caller writes them through a sanitizing namer — no zip-slip is possible here.
+    """
+    md = ""
+    figs: dict[str, bytes] = {}
+    total = 0
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            ext = os.path.splitext(info.filename.lower())[1]
+            if ext in (".md", ".mmd") and not md:
+                md = zf.read(info).decode("utf-8", errors="replace")
+            elif ext in _FIG_EXTS and total < _ZIP_MAX_BYTES:
+                data = zf.read(info)
+                total += len(data)
+                figs[os.path.basename(info.filename)] = data
+    return md.strip(), figs
 
 
 def convert(data: bytes, mime: str, filename: str) -> str:

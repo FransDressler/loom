@@ -38,6 +38,17 @@ Anführungszeichen, keine Markdown-Formatierung — nur der Beschreibungstext.""
 
 _CAPTION_MAX = 300
 
+# Remote images below this size are icons / tracking pixels, not real figures —
+# localizing+captioning them wastes a model call and clutters the note.
+_MIN_FIGURE_BYTES = 6000
+# URL path segments that mark chrome rather than content (word-bounded so e.g.
+# "silicon" is not mistaken for an "icon"). Tracking/ad hosts are matched too.
+_JUNK_RE = re.compile(
+    r"[\W_](?:icon|logo|avatar|sprite|favicon|gravatar|spacer|emoji|badge)s?[\W_]"
+    r"|/ads?/|doubleclick|googlesyndication|/analytics|/tracking",
+    re.IGNORECASE,
+)
+
 
 class FigureError(RuntimeError):
     """A figure could not be downloaded."""
@@ -112,14 +123,62 @@ def enrich_markdown(
         url = match.group(1).strip().split()[0]  # drop any optional "title"
         if not url.lower().startswith(("http://", "https://")) or done >= max_images:
             return match.group(0)
+        if _JUNK_RE.search(url):  # logo/icon/avatar/tracking — never a real figure
+            return match.group(0)
         try:
             data = fetch(url)
         except FigureError as exc:
             if verbose:
                 print(f"figure skipped: {exc}", flush=True)
             return match.group(0)
+        if len(data) < _MIN_FIGURE_BYTES:  # icon / tracking pixel — skip, don't caption
+            return match.group(0)
         done += 1
         name = _store_figure(assets_dir, url, data)
+        if verbose:
+            print(f"figure stored: {name}", flush=True)
+        try:
+            caption = describe(assets_dir / name, model)
+        except Exception as exc:  # describe is best-effort; never block a capture
+            if verbose:
+                print(f"figure caption failed: {exc}", flush=True)
+            caption = ""
+        embed = f"![[{name}]]"
+        return f"{embed}\n*Abb.: {caption}*" if caption else embed
+
+    return _IMG_RE.sub(replace, md)
+
+
+def embed_local_figures(
+    md: str,
+    figures: dict[str, bytes],
+    *,
+    assets_dir: Path,
+    model: str,
+    max_images: int,
+    verbose: bool = False,
+) -> str:
+    """Localize Mathpix `md.zip` figures into the vault and caption each.
+
+    Mirrors `enrich_markdown`, but the image bytes come from `figures`
+    (`{basename: bytes}`, as returned by `mathpix.ocr_pdf_with_figures`) instead of
+    being fetched over HTTP. Rewrites `![](images/<name>)` links into Obsidian
+    embeds (`![[<name>]]`) followed by a Haiku-generated caption. Links whose
+    basename is not in `figures` are left untouched.
+    """
+    if not figures:
+        return md
+    assets_dir = Path(assets_dir)
+    done = 0
+
+    def replace(match: re.Match) -> str:
+        nonlocal done
+        ref = match.group(1).strip().split()[0]  # drop any optional "title"
+        data = figures.get(os.path.basename(ref))
+        if data is None or done >= max_images:
+            return match.group(0)
+        done += 1
+        name = _store_figure(assets_dir, ref, data)
         if verbose:
             print(f"figure stored: {name}", flush=True)
         try:

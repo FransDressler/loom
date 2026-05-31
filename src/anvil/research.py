@@ -297,13 +297,30 @@ def _store_raw_source(folder: str, slug: str, src: dict, vault: str) -> str | No
     url = (src.get("url") or "").strip()
     if not url:
         return None
+    assets_dir = Path(vault) / config.RESEARCH_ASSET_DIR
+    original = ""  # basename of the stored original PDF, if any
+    figs: dict[str, bytes] = {}  # Mathpix-extracted figures keyed by basename
     try:
         if (src.get("kind") or "").lower() == "pdf":
             if not mathpix.is_configured():
                 return None
             data = figures.fetch(url)
-            mime = _guess_mime(url) or "application/pdf"
-            md = mathpix.convert(data, mime, os.path.basename(url) or "document.pdf")
+            doc_name = os.path.basename(url) or "document.pdf"
+            if config.DESCRIBE_IMAGES:
+                # `md.zip` so Mathpix also returns the document's cropped figures.
+                md, figs = mathpix.ocr_pdf_with_figures(data, doc_name)
+            else:
+                md = mathpix.convert(data, _guess_mime(url) or "application/pdf", doc_name)
+            # Keep the original PDF beside the cluster's figures (SAGE-style), so the
+            # note can link/embed the source document, not just its OCR text. Force a
+            # `.pdf` extension — many PDF URLs (e.g. arxiv.org/pdf/<id>) have none, and
+            # the figure namer would otherwise mislabel the bytes as `.jpg`.
+            try:
+                assets_dir.mkdir(parents=True, exist_ok=True)
+                pdf_name = doc_name if doc_name.lower().endswith(".pdf") else f"{doc_name}.pdf"
+                original = figures._store_figure(assets_dir, pdf_name, data)
+            except Exception:  # storing the original is best-effort
+                original = ""
         else:
             md = mdconvert.convert_url(url)
     except Exception as exc:  # noqa: BLE001 — best-effort; agent fetches as fallback
@@ -311,11 +328,31 @@ def _store_raw_source(folder: str, slug: str, src: dict, vault: str) -> str | No
         return None
     if not md:
         return None
+    # Localize + caption embedded figures so the raw note carries REAL source images.
+    # Exactly one localizer per source (one shared cap): Mathpix md.zip crops go through
+    # embed_local_figures; web/MarkItDown remote ![](url) links go through enrich_markdown.
+    if config.DESCRIBE_IMAGES:
+        try:
+            if figs:
+                md = figures.embed_local_figures(
+                    md, figs, assets_dir=assets_dir,
+                    model=config.DESCRIBE_MODEL, max_images=config.RESEARCH_DEEP_FIG_MAX,
+                )
+            else:
+                md = figures.enrich_markdown(
+                    md, assets_dir=assets_dir,
+                    model=config.DESCRIBE_MODEL, max_images=config.RESEARCH_DEEP_FIG_MAX,
+                )
+        except Exception:  # enrichment is best-effort; keep the raw markdown on failure
+            pass
     md = md[: config.MARKITDOWN_MAX_CHARS]
     raw_dir = Path(vault) / folder / config.RESEARCH_DEEP_RAW_SUBDIR
     raw_dir.mkdir(parents=True, exist_ok=True)
     name = f"{slug}.quelle"
-    front = f"---\nsource_url: {url}\nfetched: {date.today().isoformat()}\n---\n\n"
+    front = f"---\nsource_url: {url}\nfetched: {date.today().isoformat()}\n"
+    if original:
+        front += f"original: {config.RESEARCH_ASSET_DIR}/{original}\n"
+    front += "---\n\n"
     (raw_dir / f"{name}.md").write_text(front + md)
     return name
 

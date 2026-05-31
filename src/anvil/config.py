@@ -166,6 +166,10 @@ RESEARCH_DEEP_RAW_SUBDIR: str = os.environ.get("ANVIL_RESEARCH_DEEP_RAW_SUBDIR",
 # alongside its note, so the cluster can be re-synthesized from raw later.
 RESEARCH_DEEP_STORE_RAW: bool = _flag("ANVIL_RESEARCH_DEEP_STORE_RAW")
 # Raw Markdown is capped at MARKITDOWN_MAX_CHARS (see below) when written.
+# When storing a raw source, localize+caption up to this many figures (per source)
+# so the raw note carries real images. Smaller than DESCRIBE_MAX_IMAGES because the
+# deep fan-out runs many sources concurrently — keeps Haiku/download cost bounded.
+RESEARCH_DEEP_FIG_MAX: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_FIG_MAX", "6"))
 # How many concept/entity notes the concept-plan stage aims for.
 RESEARCH_DEEP_CONCEPT_MIN: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_CONCEPT_MIN", "8"))
 RESEARCH_DEEP_CONCEPT_MAX: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_CONCEPT_MAX", "25"))
