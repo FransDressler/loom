@@ -137,11 +137,15 @@ def send_text(chat_id: str, message: str) -> None:
 
 def _is_noise(msg: dict, text: str) -> bool:
     """True for messages we must never capture (our own sends, system items, reactions)."""
-    if msg.get("fromMe"):  # our own outgoing messages, including confirmations
+    # Outgoing messages are normally noise. With WA_CAPTURE_OWN (WAHA linked to
+    # your own number, jotting into the "Message yourself" chat) they ARE the
+    # input, so we keep them — the prefix check below still drops ANVIL's own
+    # ✅/📋 replies, so this never loops.
+    if msg.get("fromMe") and not config.WA_CAPTURE_OWN:
         return True
     if (msg.get("type") or "").lower() in _SYSTEM_TYPES:
         return True
-    if inbox.is_own_message(text):  # belt-and-braces: our confirmation / cleaner proposal
+    if inbox.is_own_message(text):  # always skip our own confirmation / proposal
         return True
     return False
 

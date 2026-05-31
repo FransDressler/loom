@@ -93,6 +93,13 @@ WA_REPLY: bool = os.environ.get("ANVIL_WA_REPLY", "1").lower() not in ("0", "fal
 WA_TIMEOUT: int = int(os.environ.get("ANVIL_WA_TIMEOUT", "30"))
 # How many recent messages to pull per poll (filtered down by the cursor).
 WA_FETCH_LIMIT: int = int(os.environ.get("ANVIL_WA_FETCH_LIMIT", "100"))
+# Capture your OWN outgoing messages too. Off by default: with a dedicated WAHA
+# number you message it from another phone, so incoming (fromMe=false) is what we
+# want and your own sends are noise. Turn ON when WAHA is linked to your OWN
+# number and you jot thoughts into the "Message yourself" chat — then fromMe
+# messages ARE the input. ANVIL's own ✅/📋 replies are still skipped by prefix,
+# so enabling this never loops.
+WA_CAPTURE_OWN: bool = os.environ.get("ANVIL_WA_CAPTURE_OWN", "0").lower() not in ("0", "false", "no", "")
 
 # --- Mathpix OCR (for document/image attachments sent via iMessage) ------------
 # When set, image and PDF attachments are run through Mathpix OCR and the

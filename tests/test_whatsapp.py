@@ -36,9 +36,21 @@ def test_classifiers_match_mathpix_and_markitdown():
 
 # --- WhatsApp noise filtering --------------------------------------------------
 
-def test_is_noise_skips_own_outgoing_messages():
+def test_is_noise_skips_own_outgoing_messages(monkeypatch):
+    monkeypatch.setattr(whatsapp.config, "WA_CAPTURE_OWN", False)
     assert whatsapp._is_noise({"fromMe": True, "body": "hi"}, "hi")
     assert not whatsapp._is_noise({"fromMe": False, "body": "hi"}, "hi")
+
+
+def test_capture_own_keeps_own_messages_but_still_drops_confirmations(monkeypatch):
+    # Own-number / "Message yourself" mode: our own thoughts (fromMe) are the input.
+    monkeypatch.setattr(whatsapp.config, "WA_CAPTURE_OWN", True)
+    assert not whatsapp._is_noise({"fromMe": True, "body": "a thought"}, "a thought")
+    # ...but ANVIL's own confirmations are still skipped by prefix, so no loop.
+    conf = f"{inbox.CONFIRM_PREFIX} · saved"
+    assert whatsapp._is_noise({"fromMe": True, "body": conf}, conf)
+    # System events stay noise regardless of the flag.
+    assert whatsapp._is_noise({"fromMe": True, "type": "reaction"}, "")
 
 
 def test_is_noise_skips_system_types_and_reactions():
