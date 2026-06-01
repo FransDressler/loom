@@ -26,6 +26,14 @@ INBOX_DIR: str = os.environ.get("ANVIL_INBOX_DIR", "inbox")
 TASKS_DIR: str = os.environ.get("ANVIL_TASKS_DIR", "tasks")
 REPORTS_DIR: str = os.environ.get("ANVIL_REPORTS_DIR", "reports")
 
+# Prefix prepended to every reply ANVIL sends back into a chat — and the marker it
+# uses to recognise its OWN messages so it never captures or loops on them. Default
+# "✅ ANVIL". Set empty ("") for clean, unprefixed replies — SAFE only when the channel
+# does NOT capture its own outgoing messages (dedicated account / capture_own off),
+# where the fromMe guard already stops the loop. In a note-to-self setup the prefix IS
+# the loop guard, so keep it non-empty there.
+REPLY_PREFIX: str = os.environ.get("ANVIL_REPLY_PREFIX", "✅ ANVIL")
+
 # --- Propose-and-confirm (confirm.py) ------------------------------------------
 # Outward/irreversible actions (delete note, send mail, merge PR, create event)
 # are queued and confirmed via iMessage before running. How long a pending
@@ -74,6 +82,14 @@ BB_SEND_METHOD: str = os.environ.get("ANVIL_BB_SEND_METHOD", "apple-script")
 # Send a short confirmation back into the chat after each capture.
 BB_REPLY: bool = os.environ.get("ANVIL_BB_REPLY", "1").lower() not in ("0", "false", "no", "")
 BB_TIMEOUT: int = int(os.environ.get("ANVIL_BB_TIMEOUT", "30"))
+# Capture your OWN outgoing messages too. On by default for the note-to-self setup
+# where ANVIL shares your Apple ID and you jot thoughts into a chat with yourself —
+# there your (fromMe) messages ARE the input, and ANVIL's own replies are skipped by
+# the CONFIRM_PREFIX. Turn OFF for a DEDICATED account (BlueBubbles signed into a
+# separate Apple ID that you message FROM your own phone): then your messages arrive
+# as fromMe=false and ANVIL's sends are fromMe=true, so capturing own would only
+# re-ingest ANVIL's own traffic. Mirrors WhatsApp's ANVIL_WA_CAPTURE_OWN.
+BB_CAPTURE_OWN: bool = os.environ.get("ANVIL_BB_CAPTURE_OWN", "1").lower() not in ("0", "false", "no", "")
 
 # --- WhatsApp inbox via a WAHA relay -------------------------------------------
 # WAHA (https://waha.devlike.pro) runs the WhatsApp HTTP API in Docker, linked to

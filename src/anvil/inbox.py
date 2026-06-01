@@ -20,8 +20,9 @@ from . import cleaner, config, confirm, figures, mathpix, mdconvert
 from .agent import run_capture
 
 # Prefix on every confirmation an inbox sends back, so the next poll recognises
-# its own messages and never captures or loops on them.
-CONFIRM_PREFIX = "✅ ANVIL"
+# its own messages and never captures or loops on them. Configurable (may be empty);
+# see config.REPLY_PREFIX.
+CONFIRM_PREFIX = config.REPLY_PREFIX
 # Cap on remembered message ids (dedup window across polls).
 SEEN_LIMIT = 1000
 
@@ -29,7 +30,7 @@ SEEN_LIMIT = 1000
 def is_own_message(text: str) -> bool:
     """True for text an inbox sent itself (a confirmation, a confirm or cleaner proposal)."""
     return (
-        text.startswith(CONFIRM_PREFIX)
+        (bool(CONFIRM_PREFIX) and text.startswith(CONFIRM_PREFIX))
         or text.startswith(confirm.PROPOSAL_PREFIX)
         or text.startswith(cleaner.PROPOSAL_PREFIX)
     )

@@ -125,10 +125,15 @@ def send_text(chat_guid: str, message: str) -> None:
 class IMessageChannel(Channel):
     name = "imessage"
     label = "iMessage"
-    # In a shared iMessage chat both you and ANVIL send as the same Apple ID, so we
-    # CAN'T tell them apart by fromMe — we capture your (fromMe) messages and rely on
-    # the CONFIRM_PREFIX to skip ANVIL's own replies.
-    capture_own = True
+
+    @property
+    def capture_own(self) -> bool:
+        # Note-to-self setup (default): you and ANVIL share one Apple ID, so we can't
+        # tell them apart by fromMe — capture your (fromMe) messages and rely on the
+        # CONFIRM_PREFIX to skip ANVIL's own replies. Dedicated account (off): your
+        # messages arrive as fromMe=false, so capturing own would re-ingest ANVIL's
+        # own sends. See config.BB_CAPTURE_OWN.
+        return config.BB_CAPTURE_OWN
 
     @property
     def chat_id(self) -> str:

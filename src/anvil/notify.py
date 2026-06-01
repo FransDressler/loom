@@ -52,8 +52,9 @@ def build_notifier(channel_name: str | None = None) -> Progress:
         return None
 
     def post(message: str) -> None:
+        prefix = f"{inbox.CONFIRM_PREFIX} · " if inbox.CONFIRM_PREFIX else ""
         try:
-            channel.send_text(f"{inbox.CONFIRM_PREFIX} · {message}"[:1500])
+            channel.send_text(f"{prefix}{message}"[:1500])
         except Exception:  # noqa: BLE001 — a progress update must never break the job
             pass
 

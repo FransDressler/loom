@@ -21,6 +21,7 @@ Adding a service is one file: subclass `Channel`, implement those, wire a CLI.
 from __future__ import annotations
 
 import mimetypes
+import re
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -335,14 +336,34 @@ def _capture_zip(channel, att, progress=None) -> str:
             f" (Fortschritt folgt){tail}.{note}")
 
 
+# A line that is ONLY dashes (--- / ----) marks a break between separate chat messages,
+# so the agent can split a longer answer into several short texts (see the # Style
+# prompt). Each chunk is sent as its own message.
+_MSG_SPLIT = re.compile(r"(?m)^[ \t]*-{3,}[ \t]*$")
+
+
+def _split_messages(message: str) -> list[str]:
+    """Split an agent reply into separate chat messages on a dash-only line."""
+    parts = [p.strip() for p in _MSG_SPLIT.split(message)]
+    return [p for p in parts if p] or [message.strip()]
+
+
 def _reply(channel: Channel, message: str) -> None:
-    """Send a confirmation/warning, tagged so the next poll skips it."""
+    """Send a confirmation/warning, tagged so the next poll skips it.
+
+    A reply may be split into several messages (dash-only separator line); only the
+    first carries the CONFIRM_PREFIX (when one is configured — it may be empty).
+    """
     if not (channel.reply_enabled and message):
         return
-    try:
-        channel.send_text(f"{inbox.CONFIRM_PREFIX} · {message}"[:1500])
-    except ChannelError as exc:
-        print(f"reply failed: {exc}", file=sys.stderr, flush=True)
+    prefix = f"{inbox.CONFIRM_PREFIX} · " if inbox.CONFIRM_PREFIX else ""
+    for i, part in enumerate(_split_messages(message)):
+        out = ((prefix if i == 0 else "") + part)[:1500]
+        try:
+            channel.send_text(out)
+        except ChannelError as exc:
+            print(f"reply failed: {exc}", file=sys.stderr, flush=True)
+            return
 
 
 def _remember(turns: list[dict], atts: list[dict], text: str, replies: list[str]) -> None:

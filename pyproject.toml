@@ -3,7 +3,7 @@ name = "anvil-brain"
 version = "0.1.0"
 description = "ANVIL — a second brain over an Obsidian vault, powered by the Claude Agent SDK"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
     "claude-agent-sdk>=0.2.87",
     "mcp>=1.2",
@@ -25,6 +25,16 @@ anvil-ingest = "anvil.ingest:main"
 anvil-tasks = "anvil.tasks:main"
 anvil-mcp = "anvil.mcp_server:main"
 anvil-web = "anvil.web:main"
+
+[tool.uv]
+# onnxruntime ships its LAST macOS x86_64 wheel at 1.23.2 (cp312/cp313 — never cp314).
+# So on an Intel Mac the whole markitdown -> magika -> onnxruntime chain only installs on
+# Python <=3.13 AND with onnxruntime pinned <=1.23.2. We run the local Intel Mac on 3.13
+# (see .python-version) and cap onnxruntime there; every OTHER platform (Linux deploy,
+# Apple-silicon, Windows) is unconstrained and keeps the latest onnxruntime via marker fork.
+constraint-dependencies = [
+    "onnxruntime<=1.23.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]
 
 [build-system]
 requires = ["hatchling"]
