@@ -8,7 +8,9 @@ import sys
 
 from . import config
 from .agent import build_options, run_once, run_repl, run_research
+from .builder_inbox import run_builder_once, run_builder_watch, submit_complaint
 from .cleaner import run_clean, run_digest, run_lint, run_normalize
+from .ingest import run_ingest_once, run_ingest_watch
 from .research import (
     build_research_options,
     run_deep_research,
@@ -17,6 +19,8 @@ from .research import (
     run_sync,
     run_wiki_integration,
 )
+from .retrieve import run_retrieve
+from .tasks import SKILLS, run_tasks_once, run_tasks_watch, submit_task
 
 
 def main() -> None:
@@ -184,13 +188,98 @@ def main() -> None:
     )
     clean.add_argument("-v", "--verbose", action="store_true", help="Log activity to stderr.")
 
+    retrieve = sub.add_parser(
+        "retrieve",
+        help="Adaptive recall: an agent decides breadth/depth itself, builds context from the "
+        "vault and answers — filing a builder-inbox complaint when the vault falls short.",
+    )
+    retrieve.add_argument("question", nargs="+", help="The question to answer from the vault.")
+    retrieve.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+    retrieve.add_argument(
+        "--model", default=config.RETRIEVE_MODEL,
+        help="Model override for the retrieval agent (default: ANVIL_RETRIEVE_MODEL).",
+    )
+    retrieve.add_argument("-v", "--verbose", action="store_true", help="Show tool activity and run stats.")
+
+    complain = sub.add_parser(
+        "complain",
+        help="File a complaint into the builder-inbox by hand: something the vault should cover "
+        "or a note you want changed. The builder picks it up on its next poll.",
+    )
+    complain.add_argument("detail", nargs="+", help="What is missing / what you want changed.")
+    complain.add_argument("--title", default=None, help="Short title (default: derived from the detail).")
+    complain.add_argument(
+        "--kind", default="gap", choices=["gap", "dislike", "research"],
+        help="gap: notes too thin · dislike: change an existing note · research: info absent from the vault.",
+    )
+    complain.add_argument(
+        "--target", action="append", default=[], metavar="NOTE",
+        help="A vault-relative note path the complaint is about. Repeatable.",
+    )
+    complain.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+
+    builder = sub.add_parser(
+        "builder",
+        help="Run the builder-inbox worker: work queued complaints down, revising the affected "
+        "notes. --watch keeps polling every BUILDER_POLL_INTERVAL seconds.",
+    )
+    builder.add_argument("--watch", action="store_true", help="Keep polling instead of a single cycle.")
+    builder.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+    builder.add_argument(
+        "--model", default=config.RETRIEVE_MODEL, help="Model override for the builder agent.",
+    )
+    builder.add_argument("-v", "--verbose", action="store_true", help="Show activity on stderr.")
+
+    ingest = sub.add_parser(
+        "ingest",
+        help="Process the document drop folder (ANVIL_INGEST_DIR): file dumped documents into "
+        "raw/ + source notes + concept wiki, then move them to .processed/. --watch keeps polling.",
+    )
+    ingest.add_argument("--watch", action="store_true", help="Keep polling the drop folder every ANVIL_INGEST_POLL_INTERVAL seconds.")
+    ingest.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+    ingest.add_argument("--model", default=config.RESEARCH_MODEL, help="Model override for the ingest agents.")
+    ingest.add_argument("-v", "--verbose", action="store_true", help="Log activity to stderr.")
+
+    tasks_p = sub.add_parser(
+        "tasks",
+        help="Run the skill task-queue worker: execute queued heavy flows (deep research, ingest, "
+        "schema/glossary/sync, …) in the background. --watch keeps polling every ANVIL_TASK_POLL_INTERVAL s.",
+    )
+    tasks_p.add_argument("--watch", action="store_true", help="Keep polling the task queue instead of a single cycle.")
+    tasks_p.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+    tasks_p.add_argument("--model", default=config.RESEARCH_MODEL, help="Model override for the queued flows.")
+    tasks_p.add_argument("-v", "--verbose", action="store_true", help="Log activity to stderr.")
+
+    queue = sub.add_parser(
+        "queue",
+        help="Enqueue a heavy ANVIL skill for the task worker to run (same queue the chat agent uses).",
+    )
+    queue.add_argument("skill", choices=SKILLS, help="The skill to queue.")
+    queue.add_argument("argument", nargs="*", help="Topic (research/deep-research) or folder (wiki); empty otherwise.")
+    queue.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+
     # A bare invocation captures a free-form thought / question (or opens the REPL).
     # argparse can't disambiguate a free-form prompt from a subcommand name when both
     # are positionals, so we route manually: only when the first non-flag token IS a
     # known subcommand do we hand off to the subparsers. Otherwise the whole line is a
     # prompt — parsed by a tiny prompt-only parser that still honours the global flags.
+    # We must skip the VALUE of a global value-flag while scanning, so that e.g.
+    # `anvil --model X research …` routes to `research` (X is a flag value, not bare)
+    # instead of silently capturing "research …" as a thought.
     raw = sys.argv[1:]
-    first_bare = next((a for a in raw if not a.startswith("-")), None)
+    _value_flags = {"--vault", "--model"}
+    first_bare = None
+    skip_next = False
+    for a in raw:
+        if skip_next:
+            skip_next = False
+            continue
+        if a in _value_flags:  # consumes the following token as its value
+            skip_next = True
+            continue
+        if not a.startswith("-"):
+            first_bare = a
+            break
     if first_bare is not None and first_bare not in sub.choices:
         pp = argparse.ArgumentParser(
             prog="anvil",
@@ -244,6 +333,52 @@ def main() -> None:
                 status_only=args.status,
             )
         )
+        return
+
+    if args.command == "retrieve":
+        asyncio.run(run_retrieve(" ".join(args.question), args.vault, args.model, args.verbose))
+        return
+
+    if args.command == "complain":
+        detail = " ".join(args.detail)
+        rel = submit_complaint(
+            args.title or detail[:60], detail,
+            kind=args.kind, source="frans", targets=args.target or None, vault=args.vault,
+        )
+        print(f"📥 Beschwerde abgelegt: {rel}")
+        return
+
+    if args.command == "builder":
+        if args.watch:
+            asyncio.run(run_builder_watch(args.vault, args.model, verbose=args.verbose))
+        else:
+            n = asyncio.run(run_builder_once(args.vault, args.model, verbose=args.verbose))
+            print(f"{n} Beschwerde(n) abgearbeitet.")
+        return
+
+    if args.command == "ingest":
+        if args.watch:
+            asyncio.run(run_ingest_watch(args.vault, args.model, verbose=args.verbose))
+        else:
+            n = asyncio.run(run_ingest_once(args.vault, args.model, verbose=args.verbose))
+            print(f"{n} Datei(en) eingearbeitet.")
+        return
+
+    if args.command == "tasks":
+        if args.watch:
+            asyncio.run(run_tasks_watch(args.vault, args.model, verbose=args.verbose))
+        else:
+            n = asyncio.run(run_tasks_once(args.vault, args.model, verbose=args.verbose))
+            print(f"{n} Aufgabe(n) ausgeführt.")
+        return
+
+    if args.command == "queue":
+        try:
+            rel = submit_task(args.skill, " ".join(args.argument), source="frans", vault=args.vault)
+        except ValueError as exc:
+            print(f"Fehler: {exc}", file=sys.stderr)
+            sys.exit(2)
+        print(f"🛠️ Aufgabe eingereiht: {rel}")
         return
 
     if args.command == "research":

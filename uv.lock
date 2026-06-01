@@ -22,6 +22,7 @@ source = { editable = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "markitdown", extra = ["audio-transcription", "youtube-transcription"] },
+    { name = "mcp" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -35,6 +36,7 @@ dev = [
 requires-dist = [
     { name = "claude-agent-sdk", specifier = ">=0.2.87" },
     { name = "markitdown", extras = ["audio-transcription", "youtube-transcription"], specifier = ">=0.1.6" },
+    { name = "mcp", specifier = ">=1.2" },
     { name = "starlette", specifier = ">=0.40" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]

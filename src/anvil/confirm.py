@@ -25,20 +25,34 @@ from pathlib import Path
 from . import config
 
 PENDING_FILE = "pending_actions.json"
-# Every confirmation request starts with this so the next iMessage poll skips
-# its own proposals instead of capturing them as notes (see imessage._is_noise).
+# Every confirmation request starts with this so the next poll skips its own
+# proposals instead of capturing them as notes (see listener.Channel.is_noise).
 PROPOSAL_PREFIX = "📋 ANVIL"
 
 _RESOLVE_NONE = {"keine", "kein", "nein", "no", "none", "nichts", "stop", "abbrechen", "behalten"}
 _RESOLVE_ALL = {"alle", "all", "alles", "ja", "yes"}
+# Words allowed *between* numbers in a selection ("1 und 3", "1 bis 3"). A reply
+# carrying any OTHER word is an ordinary thought that merely happens to contain a
+# digit — it must NOT be read as a confirmation (see parse_selection).
+_SELECTION_CONNECTORS = {"und", "bis", "u", "and", "to", "sowie"}
 
 # kind -> handler(payload: dict) -> short result line. Populated by register().
 _HANDLERS: dict[str, Callable[[dict], str]] = {}
+# chat -> send_text(chat, message). Channels register their transport so a proposal
+# is sent back over the SAME channel that will answer it. Empty (e.g. in the cleaner
+# process) falls back to iMessage, matching the historical behaviour.
+_SENDERS: dict[str, Callable[[str, str], None]] = {}
 
 
 def register(kind: str, handler: Callable[[dict], str]) -> None:
     """Register the executor for an action `kind`. Idempotent (last wins)."""
     _HANDLERS[kind] = handler
+
+
+def register_sender(chat: str, send_text: Callable[[str, str], None]) -> None:
+    """Register how to text a proposal into `chat` (so it isn't hardwired to iMessage)."""
+    if chat:
+        _SENDERS[chat] = send_text
 
 
 # --- pending state -------------------------------------------------------------
@@ -107,18 +121,30 @@ def format_proposal(items: list[dict]) -> str:
 
 
 def send_proposal(chat: str, items: list[dict] | None = None) -> None:
-    """Text the current pending proposal into `chat`."""
-    from . import imessage  # lazy: imessage imports confirm
-
+    """Text the current pending proposal into `chat` (via its registered sender)."""
     if items is None:
         pending = load_pending()
         items = pending["items"] if pending else []
-    if items:
-        imessage.send_text(chat, format_proposal(items)[:3000])
+    if not items:
+        return
+    text = format_proposal(items)[:3000]
+    sender = _SENDERS.get(chat)
+    if sender is not None:
+        sender(chat, text)
+        return
+    from . import imessage  # lazy: imessage imports confirm
+
+    imessage.send_text(chat, text)
 
 
 def parse_selection(reply: str, count: int) -> list[int] | None:
     """Map a reply to 0-based indices to execute. None => not a confirmation.
+
+    A reply only counts as a confirmation when it is "selection-shaped": digits
+    plus selection connectors ("1 und 3", "1 bis 3") and nothing else, or a bare
+    "alle"/"keine". An ordinary thought that merely contains a number ("Kapitel 2
+    lesen", "um 3 Uhr") falls through to None so it is captured as a note instead
+    of silently executing — or wiping — a pending proposal.
 
     Public so non-queue callers (e.g. the cleaner's local interactive flow) can
     reuse the exact "1 3" / "alle" / "keine" parsing without duplicating it.
@@ -129,9 +155,9 @@ def parse_selection(reply: str, count: int) -> list[int] | None:
         return []
     if words & _RESOLVE_ALL and not nums:
         return list(range(count))
-    if nums:
+    if nums and not (words - _SELECTION_CONNECTORS - _RESOLVE_ALL - _RESOLVE_NONE):
         return sorted({n - 1 for n in nums if 1 <= n <= count})
-    return None  # neither keywords nor numbers — treat as a normal capture
+    return None  # not selection-shaped (or no numbers) — treat as a normal capture
 
 
 def _run(item: dict) -> str:
@@ -144,14 +170,20 @@ def _run(item: dict) -> str:
         return f"⚠️ Fehler bei »{item.get('summary', '')}«: {exc}"
 
 
-def try_resolve(reply: str) -> tuple[bool, str]:
+def try_resolve(reply: str, chat: str | None = None) -> tuple[bool, str]:
     """If a proposal is pending and `reply` answers it, execute and return (True, summary).
 
     Returns (False, "") when nothing is pending or the reply is not a confirmation,
     so the caller can treat the message as a normal capture instead.
+
+    When `chat` is given, the reply only resolves a proposal that was sent to THAT
+    chat — so a digit-bearing message in one channel can never execute or clear a
+    proposal targeted at another (the pending queue is process-global).
     """
     pending = load_pending()
     if not pending:
+        return False, ""
+    if chat is not None and pending.get("chat") not in (None, "", chat):
         return False, ""
     items: list[dict] = pending.get("items", [])
     selection = parse_selection(reply, len(items))

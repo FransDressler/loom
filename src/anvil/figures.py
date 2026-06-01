@@ -85,7 +85,7 @@ async def _describe_async(path: str, model: str) -> str:
         allowed_tools=["Read"],
         permission_mode="bypassPermissions",
         model=model,
-        setting_sources=None,
+        setting_sources=[],  # [] = SDK isolation; None would load global settings/CLAUDE.md
         # Mirror archive.py's recursion guard so this short-lived helper session
         # is never itself archived by the SessionEnd hook.
         env={"ANVIL_ARCHIVING": "1"},
@@ -117,10 +117,14 @@ def enrich_markdown(
     """Localize remote figures in `md` and append a Haiku-generated caption to each."""
     assets_dir = Path(assets_dir)
     done = 0
+    seen: dict[str, str] = {}  # url -> replacement, so a repeated figure isn't re-fetched,
+    #                            re-captioned (a paid call) or counted against max_images twice.
 
     def replace(match: re.Match) -> str:
         nonlocal done
         url = match.group(1).strip().split()[0]  # drop any optional "title"
+        if url in seen:
+            return seen[url]
         if not url.lower().startswith(("http://", "https://")) or done >= max_images:
             return match.group(0)
         if _JUNK_RE.search(url):  # logo/icon/avatar/tracking — never a real figure
@@ -144,7 +148,9 @@ def enrich_markdown(
                 print(f"figure caption failed: {exc}", flush=True)
             caption = ""
         embed = f"![[{name}]]"
-        return f"{embed}\n*Abb.: {caption}*" if caption else embed
+        result = f"{embed}\n*Abb.: {caption}*" if caption else embed
+        seen[url] = result
+        return result
 
     return _IMG_RE.sub(replace, md)
 
@@ -170,11 +176,16 @@ def embed_local_figures(
         return md
     assets_dir = Path(assets_dir)
     done = 0
+    seen: dict[str, str] = {}  # basename -> replacement, so a figure referenced more than
+    #                            once isn't stored/captioned (a paid call) or counted twice.
 
     def replace(match: re.Match) -> str:
         nonlocal done
         ref = match.group(1).strip().split()[0]  # drop any optional "title"
-        data = figures.get(os.path.basename(ref))
+        base = os.path.basename(ref)
+        if base in seen:
+            return seen[base]
+        data = figures.get(base)
         if data is None or done >= max_images:
             return match.group(0)
         done += 1
@@ -188,6 +199,8 @@ def embed_local_figures(
                 print(f"figure caption failed: {exc}", flush=True)
             caption = ""
         embed = f"![[{name}]]"
-        return f"{embed}\n*Abb.: {caption}*" if caption else embed
+        result = f"{embed}\n*Abb.: {caption}*" if caption else embed
+        seen[base] = result
+        return result
 
     return _IMG_RE.sub(replace, md)

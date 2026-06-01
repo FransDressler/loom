@@ -101,6 +101,17 @@ WA_FETCH_LIMIT: int = int(os.environ.get("ANVIL_WA_FETCH_LIMIT", "100"))
 # so enabling this never loops.
 WA_CAPTURE_OWN: bool = os.environ.get("ANVIL_WA_CAPTURE_OWN", "0").lower() not in ("0", "false", "no", "")
 
+# Outbound media: give the WhatsApp agent a `send_attachment` tool so it can send
+# a vault file (image/PDF/audio/document) BACK into the chat — e.g. you ask
+# "schick mir die Skizze aus Notiz X" and it sends the embedded image. The tool is
+# sandboxed to the vault root (no path escapes, no protected dirs). On by default;
+# set 0 to keep recall text-only. Sends go via WAHA sendImage/sendFile/sendVoice.
+# Automatically disabled when WA_CAPTURE_OWN is on (own-number mode): a file ANVIL
+# sends there would be echoed back as your own message and re-captured.
+WA_SEND_MEDIA: bool = os.environ.get("ANVIL_WA_SEND_MEDIA", "1").lower() not in ("0", "false", "no", "")
+# Hard cap on a single outbound file (MB) so a huge embed can't be blasted out.
+OUTBOX_MAX_MB: int = int(os.environ.get("ANVIL_OUTBOX_MAX_MB", "16"))
+
 # --- Mathpix OCR (for document/image attachments sent via iMessage) ------------
 # When set, image and PDF attachments are run through Mathpix OCR and the
 # resulting Markdown is captured into the vault. Get credentials at
@@ -203,6 +214,26 @@ MARKITDOWN_URLS: bool = _flag("ANVIL_MARKITDOWN_URLS")
 # Cap the converted text handed to the agent (a whole EPub can be enormous).
 MARKITDOWN_MAX_CHARS: int = int(os.environ.get("ANVIL_MARKITDOWN_MAX_CHARS", "80000"))
 
+# Voice notes: WhatsApp sends them as ogg/opus, which MarkItDown's audio converter
+# rejects outright — so ANVIL transcodes any audio to WAV via ffmpeg first, then
+# transcribes it with MarkItDown's bundled speech-recognition stack. The language
+# passed to the recognizer (Google Web Speech): de-DE by default, since the vault
+# is German. The original audio is always stored alongside the transcript.
+AUDIO_LANG: str = os.environ.get("ANVIL_AUDIO_LANG", "de-DE")
+
+
+# --- Conversational chat history ----------------------------------------------
+# Keep a rolling per-chat transcript (your messages + ANVIL's replies) so the
+# agent has the whole recent conversation as context and you can carry a topic
+# across several messages ("füge das der Notiz von eben hinzu", "wie hieß sie?").
+# Fed as a context block into every capture/recall; the agent still acts only on
+# the newest message. On by default.
+CHAT_HISTORY: bool = _flag("ANVIL_CHAT_HISTORY")
+# How many recent turns (a turn = one message or one reply) to feed back.
+CHAT_HISTORY_TURNS: int = int(os.environ.get("ANVIL_CHAT_HISTORY_TURNS", "16"))
+# Cap on characters kept per remembered turn (keeps the context block bounded).
+CHAT_HISTORY_MAX_CHARS: int = int(os.environ.get("ANVIL_CHAT_HISTORY_MAX_CHARS", "1500"))
+
 
 # --- Daily vault cleaner -------------------------------------------------------
 # A once-a-day pass that (1) gardens the vault non-destructively via the ANVIL
@@ -253,6 +284,158 @@ DIGEST_RECENT_DAYS: int = int(os.environ.get("ANVIL_DIGEST_RECENT_DAYS", "7"))
 # `anvil normalize [--all]` does an on-demand sweep.
 CLEANER_NORMALIZE: bool = _flag("ANVIL_CLEANER_NORMALIZE")
 CLEANER_NORMALIZE_MAX_TURNS: int = int(os.environ.get("ANVIL_CLEANER_NORMALIZE_MAX_TURNS", "40"))
+
+
+# --- Retrieval-Rework: adaptiver Retrieval-Agent + Builder-Beschwerde-Inbox -----
+# See docs/retrieval-rework.md. `anvil retrieve "<frage>"` launches an agent that
+# decides BREADTH (how many notes) and DEPTH (how many linked notes to follow)
+# itself, builds a context block, and — when the vault does not cover the question
+# — files a COMPLAINT into the builder-inbox instead of failing. A separate builder
+# poll works that inbox down, revising/extending the affected notes.
+
+# Model for the retrieval + builder agents. None => RESEARCH_MODEL => account default.
+RETRIEVE_MODEL: str | None = os.environ.get("ANVIL_RETRIEVE_MODEL") or None
+# Turn budget for one retrieval run (search the vault, follow links, synthesize).
+RETRIEVE_MAX_TURNS: int = int(os.environ.get("ANVIL_RETRIEVE_MAX_TURNS", "40"))
+
+# Builder-inbox: a dedicated vault folder, SEPARATE from the agent-network inbox/.
+# Complaints (things we don't like / gaps) are .md files under <dir>/todo/; once
+# the builder has acted, the entry is moved to <dir>/done/. Both agents and the
+# user file complaints here. `anvil-builder --watch` works todo/ down on a poll
+# while the project runs; `--poll` does a single cycle (for a systemd timer).
+BUILDER_INBOX_DIR: str = os.environ.get("ANVIL_BUILDER_INBOX_DIR", "builder-inbox")
+# Seconds between todo/ checks in the long-running `anvil-builder --watch`.
+BUILDER_POLL_INTERVAL: int = int(os.environ.get("ANVIL_BUILDER_POLL_INTERVAL", "10"))
+# Turn budget for the builder working ONE complaint (read sources, revise notes).
+BUILDER_MAX_TURNS: int = int(os.environ.get("ANVIL_BUILDER_MAX_TURNS", "40"))
+# How many complaints one poll cycle processes before returning (bounds a cycle).
+BUILDER_BATCH: int = int(os.environ.get("ANVIL_BUILDER_BATCH", "3"))
+# Let the builder escalate to research when a complaint's info is not in the
+# vault/sources at all (Source-Miss): it files a follow-up `research` complaint
+# the same inbox carries. Off by default keeps the builder vault-only (cheaper).
+BUILDER_ALLOW_RESEARCH: bool = _flag("ANVIL_BUILDER_ALLOW_RESEARCH", "0")
+
+
+# --- Document ingest (anvil-ingest) --------------------------------------------
+# A drop folder you dump documents into. A worker (`anvil-ingest --watch`) picks
+# new files up and runs each through the SAME pipeline as deep research — but the
+# dumped files ARE the sources (no web discovery): per file it writes the scanned
+# Mathpix/MarkItDown Markdown to <folder>/raw/<slug>.quelle.md (so you can
+# re-research later), a source note with summary/findings, embeds figures, and
+# stores the original in attachments/; then (optionally) builds the concept/wiki
+# layer + Hub across the sources. Once a file is safely in raw/ + attachments/ it
+# is moved OUT of the drop folder into <dump>/.processed/ (recoverable).
+# The drop folder lives OUTSIDE the vault by default so raw dumps never hit Obsidian.
+INGEST_DIR: str = os.path.expanduser(os.environ.get("ANVIL_INGEST_DIR", "~/anvil-dump"))
+# Vault cluster folder the ingested sources accumulate in (relative to the vault).
+INGEST_FOLDER: str = os.environ.get("ANVIL_INGEST_FOLDER", "Eingang")
+# Seconds between drop-folder checks in the long-running `anvil-ingest --watch`.
+INGEST_POLL_INTERVAL: int = int(os.environ.get("ANVIL_INGEST_POLL_INTERVAL", "10"))
+# Only process a file once its mtime has been stable this long — avoids grabbing a
+# file that is still being copied in (e.g. mid-transfer of 20 PDFs).
+INGEST_SETTLE_SECONDS: int = int(os.environ.get("ANVIL_INGEST_SETTLE_SECONDS", "5"))
+# Max files processed per poll cycle (the rest wait for the next cycle).
+INGEST_BATCH: int = int(os.environ.get("ANVIL_INGEST_BATCH", "10"))
+# After the raw + source-note layer, also build the concept/wiki layer (stages
+# 3–5: concepts across the sources, fold into notes, Hub). On by default. Turn off
+# for unrelated dumps where a cross-source synthesis adds little (run `anvil wiki
+# Eingang` by hand later if you want it).
+INGEST_INTEGRATE: bool = _flag("ANVIL_INGEST_INTEGRATE")
+# How many source sub-agents run at once (defaults to the deep-research budget).
+INGEST_CONCURRENCY: int = int(os.environ.get("ANVIL_INGEST_CONCURRENCY", str(RESEARCH_DEEP_CONCURRENCY)))
+# A .zip sent to a chat (or dropped in the folder) is UNPACKED and each file inside
+# is filed individually through the ingest pipeline. These caps keep a malicious or
+# runaway archive (zip bomb) from filling the disk: extraction stops once either the
+# member count or the total uncompressed size is exceeded.
+INGEST_ZIP_MAX_MEMBERS: int = int(os.environ.get("ANVIL_INGEST_ZIP_MAX_MEMBERS", "300"))
+INGEST_ZIP_MAX_TOTAL_MB: int = int(os.environ.get("ANVIL_INGEST_ZIP_MAX_TOTAL_MB", "500"))
+
+
+# --- Skill task queue (anvil-tasks) --------------------------------------------
+# A claim-by-move queue (like the builder-inbox) for the HEAVY ANVIL flows that
+# must run async — deep research, ingest, schema/glossary/sync rebuilds, etc. The
+# messaging inboxes (WhatsApp/iMessage) get a `queue_skill` tool so the agent can
+# enqueue one of these when you ask, and a worker (`anvil-tasks --watch`) runs them
+# down off the chat thread (no poll timeout). Tasks land as .md under <dir>/todo/.
+TASK_QUEUE_DIR: str = os.environ.get("ANVIL_TASK_QUEUE_DIR", "agent-tasks")
+# Seconds between todo/ checks in the long-running `anvil-tasks --watch`.
+TASK_POLL_INTERVAL: int = int(os.environ.get("ANVIL_TASK_POLL_INTERVAL", "10"))
+# How many tasks one poll cycle runs before returning (each can be very heavy).
+TASK_BATCH: int = int(os.environ.get("ANVIL_TASK_BATCH", "1"))
+
+# Give the messaging inboxes a skills overview + the `queue_skill` tool, so the
+# agent knows the full ANVIL menu and can queue heavy flows. On by default.
+INBOX_SKILLS: bool = _flag("ANVIL_INBOX_SKILLS")
+
+# Progress updates: long background jobs (document ingest, queued skills) post
+# short one-liners as they move through stages ("📄 3/10 durch Mathpix",
+# "📚 Konzept-Wiki wird gebaut", "✅ fertig"). The messaging listeners ALWAYS report
+# attachment progress back into the chat the file came from; this setting only
+# routes jobs with NO inbound chat (the dump-folder ingest watcher, the task worker)
+# to a channel. One of: whatsapp | telegram | discord | imessage | "" (off).
+NOTIFY_CHANNEL: str = os.environ.get("ANVIL_NOTIFY_CHANNEL", "whatsapp").strip().lower()
+
+
+# --- Code sessions (headless Claude Code from a chat code request) --------------
+# When the messaging agent judges a message to be a CODING task (write/fix/refactor
+# code, run a build/test, …) rather than a note or a question, it hands it to a
+# headless `claude -p --dangerously-skip-permissions` run in CODE_DIR via the task
+# worker; progress + the resulting git diff are posted back into the chat.
+# ⚠️ DANGEROUS: this runs Claude Code with FULL permissions (arbitrary shell commands
+# and edits) in CODE_DIR, triggered by a chat message. Off by default — set CODE_DIR
+# to your repo AND enable to use it. Only you can post to a dedicated/own-number chat,
+# so the trigger is your own WhatsApp, but treat it as remote code execution.
+CODE_SESSIONS: bool = _flag("ANVIL_CODE_SESSIONS", "0")
+# The repository / working directory code sessions run in (full permissions).
+CODE_DIR: str = os.path.expanduser(os.environ.get("ANVIL_CODE_DIR", ""))
+# Model for the headless code run (None => Claude Code's default).
+CODE_MODEL: str | None = os.environ.get("ANVIL_CODE_MODEL") or None
+# Hard timeout for one code run (seconds) before it is killed.
+CODE_TIMEOUT_S: int = int(os.environ.get("ANVIL_CODE_TIMEOUT_S", "1800"))
+# Cap on the diff text portion, and on the whole result message posted to the chat
+# (kept under the messaging transports' ~1500-char cap so nothing is silently cut).
+CODE_DIFF_MAX_CHARS: int = int(os.environ.get("ANVIL_CODE_DIFF_MAX_CHARS", "1000"))
+CODE_RESULT_MAX_CHARS: int = int(os.environ.get("ANVIL_CODE_RESULT_MAX_CHARS", "1400"))
+
+# --- Full agent (the chat agent itself gets unrestricted permissions) -----------
+# By default the social-media/chat agent is sandboxed: a fixed tool set
+# (Read/Write/Edit/Glob/Grep/Web*) scoped to the vault, permission_mode=acceptEdits,
+# and NO Bash — it can file notes and recall, but not run arbitrary commands. With
+# FULL_AGENT on, the SAME agent every chat message wakes is given the full Claude Code
+# tool set INCLUDING Bash and permission_mode=bypassPermissions — equivalent to a
+# `claude --dangerously-skip-permissions` session, but for EVERY incoming message.
+# ⚠️ DANGEROUS: this is remote code execution via chat — anyone who can post to a
+# watched chat can run any command / read any file on this machine. Off by default;
+# enable ONLY for a chat that only you can reach (e.g. your own-number WhatsApp group).
+# Independent of CODE_SESSIONS (which is a separate, repo-scoped headless flow).
+FULL_AGENT: bool = _flag("ANVIL_FULL_AGENT", "0")
+
+
+# --- Telegram channel (anvil-telegram) -----------------------------------------
+# A Telegram bot is the easiest channel to run: talk to @BotFather to create a bot
+# and get its token, then message your bot (or add it to a group). Find your chat id
+# with `anvil-telegram --list-chats` (it reads the bot's pending updates). No relay,
+# no extra container — just the Bot HTTP API.
+TG_BOT_TOKEN: str = os.environ.get("ANVIL_TG_BOT_TOKEN", "")
+# The chat ANVIL watches and replies into (your user id, or a group/channel id).
+TG_CHAT_ID: str = os.environ.get("ANVIL_TG_CHAT_ID", "")
+TG_API_URL: str = os.environ.get("ANVIL_TG_API_URL", "https://api.telegram.org")
+TG_REPLY: bool = _flag("ANVIL_TG_REPLY")            # send a confirmation back
+TG_SEND_MEDIA: bool = _flag("ANVIL_TG_SEND_MEDIA")  # give the agent send_attachment
+TG_TIMEOUT: int = int(os.environ.get("ANVIL_TG_TIMEOUT", "30"))
+
+
+# --- Discord channel (anvil-discord) -------------------------------------------
+# A Discord bot, polled over the REST API (no gateway/websocket). Create a bot in
+# the Discord developer portal, enable the MESSAGE CONTENT intent, invite it to your
+# server, and put the bot token + the channel id here. ANVIL polls that one channel.
+DISCORD_BOT_TOKEN: str = os.environ.get("ANVIL_DISCORD_BOT_TOKEN", "")
+# The channel ANVIL watches and replies into (a Discord channel id / snowflake).
+DISCORD_CHANNEL_ID: str = os.environ.get("ANVIL_DISCORD_CHANNEL_ID", "")
+DISCORD_API_URL: str = os.environ.get("ANVIL_DISCORD_API_URL", "https://discord.com/api/v10")
+DISCORD_REPLY: bool = _flag("ANVIL_DISCORD_REPLY")
+DISCORD_SEND_MEDIA: bool = _flag("ANVIL_DISCORD_SEND_MEDIA")
+DISCORD_TIMEOUT: int = int(os.environ.get("ANVIL_DISCORD_TIMEOUT", "30"))
 
 
 # --- Web chat front-end --------------------------------------------------------

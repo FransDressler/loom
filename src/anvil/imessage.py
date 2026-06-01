@@ -1,12 +1,13 @@
-"""iMessage inbox for ANVIL, via a BlueBubbles relay running on a Mac.
+"""iMessage channel for ANVIL, via a BlueBubbles relay running on a Mac.
 
-You text a thought into a designated iMessage chat; a periodic poll (systemd
-timer / cron) pulls new messages off the BlueBubbles REST API, captures each one
-into the vault through the ANVIL agent, and texts back a short confirmation.
+A thin transport adapter over the shared listener engine (`anvil.listener`): this
+module only knows how to talk to BlueBubbles (a small server on a Mac signed into
+Messages, exposing a REST API). The capture pipeline — noise filtering, attachment
+OCR/transcription, chat history — lives in the engine and is shared with every
+other channel.
 
-Image and PDF attachments are run through Mathpix OCR first (if credentials are
-configured); the recognised Markdown is captured and the original file is stored
-in the vault and embedded in the note.
+You text a thought into a designated iMessage chat; a periodic poll pulls new
+messages, captures each into the vault, and texts back a short confirmation.
 
 Usage:
     anvil-imessage --check         verify the connection to BlueBubbles
@@ -17,7 +18,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import sys
 import urllib.error
@@ -25,20 +25,22 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from . import cleaner, config, confirm, inbox, mathpix, mdconvert
-from .agent import build_options, run_capture
+from . import cleaner, config, listener, mathpix
+from .listener import Channel, ChannelError
 
 # Importing cleaner registers its delete_note handler with confirm, so a pending
 # deletion proposal can be resolved here via confirm.try_resolve.
 
 # Re-fetch a little before the cursor so a boundary message is never missed,
-# regardless of whether the API's `after` filter is inclusive.
+# regardless of whether the API's `after` filter is inclusive (BlueBubbles ms).
 BACKTRACK_MS = 60_000
 
 
-class BlueBubblesError(RuntimeError):
+class BlueBubblesError(ChannelError):
     """A BlueBubbles request failed or the server is unreachable."""
 
+
+# --- transport -----------------------------------------------------------------
 
 def _request(method: str, path: str, *, params: dict | None = None, body: dict | None = None) -> dict:
     if not config.BB_PASSWORD:
@@ -118,188 +120,55 @@ def send_text(chat_guid: str, message: str) -> None:
     )
 
 
-# --- noise & attachment classification -----------------------------------------
+# --- channel adapter -----------------------------------------------------------
 
-def _is_noise(msg: dict, text: str) -> bool:
-    """True for messages we must never capture (reactions, system items, our own replies)."""
-    if msg.get("associatedMessageGuid"):  # a tapback / reaction, not a message
-        return True
-    if msg.get("itemType", 0) != 0:  # group rename, member change, etc.
-        return True
-    if inbox.is_own_message(text):  # our own confirmation / warning / confirm proposal
-        return True
-    return False
+class IMessageChannel(Channel):
+    name = "imessage"
+    label = "iMessage"
+    # In a shared iMessage chat both you and ANVIL send as the same Apple ID, so we
+    # CAN'T tell them apart by fromMe — we capture your (fromMe) messages and rely on
+    # the CONFIRM_PREFIX to skip ANVIL's own replies.
+    capture_own = True
 
+    @property
+    def chat_id(self) -> str:
+        return config.BB_CHAT_GUID
 
-def _document_attachments(msg: dict) -> list[dict]:
-    """Attachments on a message that Mathpix can OCR (images and PDFs)."""
-    docs = []
-    for att in msg.get("attachments") or []:
-        if att.get("isSticker"):
-            continue
-        if (att.get("totalBytes") or 0) == 0:
-            continue
-        if not inbox.is_document(att.get("mimeType") or ""):
-            continue
-        docs.append(att)
-    return docs
+    @property
+    def reply_enabled(self) -> bool:
+        return config.BB_REPLY
 
+    def fetch(self, cursor: int) -> list[dict]:
+        return fetch_messages(self.chat_id, max(0, cursor - BACKTRACK_MS) if cursor else 0)
 
-def _media_attachments(msg: dict) -> list[dict]:
-    """Attachments MarkItDown should convert (audio, EPub) — not Mathpix's job."""
-    docs = []
-    for att in msg.get("attachments") or []:
-        if att.get("isSticker"):
-            continue
-        if (att.get("totalBytes") or 0) == 0:
-            continue
-        if inbox.is_media(att.get("mimeType") or ""):
-            docs.append(att)
-    return docs
-
-
-# --- replies & attachments -----------------------------------------------------
-
-def _reply(chat: str, message: str) -> None:
-    """Send a confirmation/warning back into the chat, tagged so the next poll skips it."""
-    if not (config.BB_REPLY and message):
-        return
-    try:
-        send_text(chat, f"{inbox.CONFIRM_PREFIX} · {message}"[:1500])
-    except BlueBubblesError as exc:
-        print(f"reply failed: {exc}", file=sys.stderr, flush=True)
-
-
-def _capture_document(att: dict, caption: str, options, verbose: bool) -> str:
-    """Download a document attachment and hand it to the shared OCR/capture path."""
-    guid = att.get("guid") or ""
-    mime = (att.get("mimeType") or "").lower()
-    name = att.get("transferName") or f"attachment-{guid[:8] or 'file'}"
-    if verbose:
-        print(f"OCR document: {name!r} ({mime})", file=sys.stderr, flush=True)
-    data = download_attachment(guid)
-    return inbox.capture_document(
-        data, name, mime, caption, options, channel="iMessage", key=guid, verbose=verbose,
-    )
-
-
-def _capture_media(att: dict, caption: str, options, verbose: bool) -> str:
-    """Download an audio/EPub attachment and hand it to the shared MarkItDown path."""
-    guid = att.get("guid") or ""
-    mime = (att.get("mimeType") or "").lower()
-    name = att.get("transferName") or f"attachment-{guid[:8] or 'file'}"
-    if verbose:
-        print(f"MarkItDown {mdconvert.kind_of(mime)}: {name!r} ({mime})", file=sys.stderr, flush=True)
-    data = download_attachment(guid)
-    return inbox.capture_media(data, name, mime, caption, options, channel="iMessage", key=guid)
-
-
-def _capture_url(url: str, text: str, options, verbose: bool) -> str:
-    """Fetch a texted-in link (YouTube/web) via MarkItDown and file it into the vault."""
-    if verbose:
-        print(f"MarkItDown URL: {url}", file=sys.stderr, flush=True)
-    return inbox.capture_url(url, text, options, channel="iMessage")
-
-
-# --- poll ----------------------------------------------------------------------
-
-def poll(verbose: bool = False) -> int:
-    chat = config.BB_CHAT_GUID
-    if not chat:
-        raise BlueBubblesError("ANVIL_BB_CHAT_GUID is not set — run with --list-chats to find it.")
-
-    state = inbox.load_state("imessage")
-    entry = state.get(chat, {})
-    last_ts: int = entry.get("last_ts", 0)
-    seen: list[str] = entry.get("seen", [])
-    seen_set = set(seen)
-
-    messages = fetch_messages(chat, max(0, last_ts - BACKTRACK_MS) if last_ts else 0)
-    options = build_options(config.VAULT_PATH, config.MODEL)
-
-    captured = 0
-    for msg in messages:
-        guid = msg.get("guid")
-        ts = msg.get("dateCreated") or 0
-        if ts > last_ts:
-            last_ts = ts
-        if not guid or guid in seen_set:
-            continue
-        seen_set.add(guid)
-        seen.append(guid)
-
-        # iMessage uses U+FFFC as an inline placeholder for each attachment; drop it
-        # so it never becomes a caption or a junk text-only note.
-        text = (msg.get("text") or "").replace("￼", "").strip()
-        if _is_noise(msg, text):
-            continue
-
-        docs = _document_attachments(msg)
-        media = _media_attachments(msg) if config.MARKITDOWN else []
-        handled_attachment = False
-
-        # Images / PDFs -> Mathpix OCR.
-        for att in docs:
-            if not mathpix.is_configured():
-                _reply(chat, "Mathpix ist nicht konfiguriert — Dokument übersprungen.")
-                break
-            try:
-                reply = _capture_document(att, text, options, verbose)
-            except (BlueBubblesError, mathpix.MathpixError) as exc:
-                print(f"document capture failed: {exc}", file=sys.stderr, flush=True)
-                _reply(chat, f"⚠️ {att.get('transferName') or 'Dokument'}: {exc}")
+    def normalize(self, raw: dict) -> dict:
+        # iMessage uses U+FFFC as an inline placeholder for each attachment; drop it.
+        text = (raw.get("text") or "").replace("￼", "")
+        atts: list[dict] = []
+        for a in raw.get("attachments") or []:
+            if a.get("isSticker") or (a.get("totalBytes") or 0) == 0:
                 continue
-            captured += 1
-            handled_attachment = True
-            _reply(chat, reply)
+            guid = a.get("guid") or ""
+            atts.append({
+                "key": guid,
+                "id": guid,
+                "mime": (a.get("mimeType") or "").lower(),
+                "name": a.get("transferName") or "",
+            })
+        return {
+            "id": raw.get("guid") or "",
+            "_sort": int(raw.get("dateCreated") or 0),
+            "text": text,
+            "from_me": bool(raw.get("isFromMe")),
+            "system": bool(raw.get("associatedMessageGuid")) or (raw.get("itemType", 0) != 0),
+            "attachments": atts,
+        }
 
-        # Audio / EPub -> MarkItDown.
-        for att in media:
-            try:
-                reply = _capture_media(att, text, options, verbose)
-            except (BlueBubblesError, mdconvert.MarkItDownError) as exc:
-                print(f"media capture failed: {exc}", file=sys.stderr, flush=True)
-                _reply(chat, f"⚠️ {att.get('transferName') or 'Datei'}: {exc}")
-                continue
-            captured += 1
-            handled_attachment = True
-            _reply(chat, reply)
+    def download(self, att: dict) -> bytes:
+        return download_attachment(att["key"])
 
-        if handled_attachment or not text:
-            continue
-
-        # A reply to a pending confirm proposal ("1 3" / "alle" / "keine") —
-        # deletions, and later mail/GitHub/calendar actions — is consumed here
-        # and executed via its registered handler instead of captured as a note.
-        handled, summary = confirm.try_resolve(text)
-        if handled:
-            _reply(chat, summary)
-            captured += 1
-            continue
-
-        # A texted-in link -> fetch via MarkItDown (YouTube transcript / article)
-        # and file the content, rather than saving a bare URL. Falls back to a
-        # normal text capture if the conversion fails.
-        url = mdconvert.find_url(text) if (config.MARKITDOWN and config.MARKITDOWN_URLS) else None
-        if url:
-            try:
-                reply = _capture_url(url, text, options, verbose)
-                captured += 1
-                _reply(chat, reply)
-                continue
-            except mdconvert.MarkItDownError as exc:
-                if verbose:
-                    print(f"url convert failed ({exc}); capturing as text", file=sys.stderr, flush=True)
-
-        if verbose:
-            print(f"capturing: {text[:80]!r}", file=sys.stderr, flush=True)
-        reply = asyncio.run(run_capture(text, options))
-        captured += 1
-        _reply(chat, reply)
-
-    state[chat] = {"last_ts": last_ts, "seen": seen[-inbox.SEEN_LIMIT:]}
-    inbox.save_state("imessage", state)
-    return captured
+    def send_text(self, text: str) -> None:
+        send_text(self.chat_id, text)  # module-level transport (not this method)
 
 
 # --- CLI -----------------------------------------------------------------------
@@ -307,7 +176,7 @@ def poll(verbose: bool = False) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="anvil-imessage",
-        description="iMessage inbox for ANVIL via a BlueBubbles relay.",
+        description="iMessage channel for ANVIL via a BlueBubbles relay.",
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--poll", action="store_true", help="Fetch and capture new messages, then exit.")
@@ -319,17 +188,21 @@ def main() -> None:
     try:
         if args.check:
             print(f"BlueBubbles OK at {config.BB_URL} (ping: {ping()})")
-            mp = "configured" if mathpix.is_configured() else "not configured (attachments ignored)"
+            mp = "configured" if mathpix.is_configured() else "not configured (images stored, not OCR'd)"
             print(f"Mathpix OCR: {mp}")
+            print(f"MarkItDown (voice/audio/office files): {'on' if config.MARKITDOWN else 'off'}"
+                  f" · voice language {config.AUDIO_LANG}")
+            print(f"Chat history context: {'on' if config.CHAT_HISTORY else 'off'}"
+                  f" (last {config.CHAT_HISTORY_TURNS} turns)")
         elif args.list_chats:
             for chat in list_chats():
                 name = chat.get("displayName") or chat.get("chatIdentifier") or "(unnamed)"
                 print(f"{chat.get('guid', '?')}\t{name}")
         elif args.poll:
-            n = poll(verbose=args.verbose)
+            n = listener.run_poll(IMessageChannel(), verbose=args.verbose)
             if args.verbose:
                 print(f"captured {n} message(s)", file=sys.stderr)
-    except BlueBubblesError as exc:
+    except ChannelError as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)
 

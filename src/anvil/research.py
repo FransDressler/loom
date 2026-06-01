@@ -201,7 +201,7 @@ def _research_options(
         permission_mode="acceptEdits",
         max_turns=max_turns,
         model=model or config.RESEARCH_MODEL,
-        setting_sources=None,
+        setting_sources=[],  # [] = SDK isolation; None would load global settings/CLAUDE.md
     )
 
 
@@ -355,6 +355,233 @@ def _store_raw_source(folder: str, slug: str, src: dict, vault: str) -> str | No
     front += "---\n\n"
     (raw_dir / f"{name}.md").write_text(front + md)
     return name
+
+
+def _store_raw_local(folder: str, slug: str, path: str, vault: str) -> str | None:
+    """Like _store_raw_source, but the source is a LOCAL file you dumped in.
+
+    Reads the file, OCRs (Mathpix for PDF/image) or converts (MarkItDown for
+    office/text/audio/EPub) it to Markdown, localizes+captions any figures, stores
+    the original under attachments/, and writes raw/<slug>.quelle.md (the scanned
+    Mathpix Markdown is kept so the cluster can be re-researched later). Returns the
+    original file's basename, or None on a hard failure (the file is not lost — the
+    caller keeps it in the drop folder's archive).
+    """
+    assets_dir = Path(vault) / config.RESEARCH_ASSET_DIR
+    original = ""
+    figs: dict[str, bytes] = {}
+    try:
+        data, mime, name = _load(path)  # local path -> (bytes, mime, filename)
+    except Exception as exc:  # noqa: BLE001 — unreadable file, skip it
+        _log(f"[ingest]   (Datei {slug} nicht lesbar: {exc})")
+        return None
+
+    is_pdf = mime in mathpix.PDF_MIMES or path.lower().endswith(".pdf")
+    is_img = mime in mathpix.IMAGE_MIMES
+    try:
+        if (is_pdf or is_img) and mathpix.is_configured():
+            if is_pdf and config.DESCRIBE_IMAGES:
+                md, figs = mathpix.ocr_pdf_with_figures(data, name)
+            elif is_pdf:
+                md = mathpix.ocr_pdf(data, name)
+            else:
+                md = mathpix.ocr_image(data, mime)
+        elif mdconvert.supports_attachment(mime, name):
+            md = mdconvert.convert_bytes(data, mime, name)
+        else:
+            # A type neither OCR nor MarkItDown can read: keep the original, raw is a stub.
+            md = f"(Aus »{name}« ließ sich kein Text automatisch extrahieren — Original eingebettet.)"
+    except Exception as exc:  # noqa: BLE001 — OCR/convert failed; still store the original
+        _log(f"[ingest]   (Text aus {slug} nicht extrahiert: {exc})")
+        md = f"(Text-Extraktion aus »{name}« fehlgeschlagen: {exc}. Original eingebettet.)"
+
+    # Store the original beside the cluster's figures so the note can embed/link it.
+    try:
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        store_name = name if (not is_pdf or name.lower().endswith(".pdf")) else f"{name}.pdf"
+        original = figures._store_figure(assets_dir, store_name, data)
+    except Exception:  # storing the original is best-effort
+        original = ""
+
+    # Localize + caption embedded figures so the raw note carries REAL source images.
+    if md and config.DESCRIBE_IMAGES:
+        try:
+            if figs:
+                md = figures.embed_local_figures(
+                    md, figs, assets_dir=assets_dir,
+                    model=config.DESCRIBE_MODEL, max_images=config.RESEARCH_DEEP_FIG_MAX,
+                )
+            else:
+                md = figures.enrich_markdown(
+                    md, assets_dir=assets_dir,
+                    model=config.DESCRIBE_MODEL, max_images=config.RESEARCH_DEEP_FIG_MAX,
+                )
+        except Exception:  # enrichment is best-effort; keep the raw markdown on failure
+            pass
+
+    md = (md or "").strip()[: config.MARKITDOWN_MAX_CHARS]
+    raw_dir = Path(vault) / folder / config.RESEARCH_DEEP_RAW_SUBDIR
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    # `source_file` (not source_url) marks this as a locally-ingested source.
+    front = f"---\nsource_file: {name}\nfetched: {date.today().isoformat()}\n"
+    if original:
+        front += f"original: {config.RESEARCH_ASSET_DIR}/{original}\n"
+    front += "---\n\n"
+    try:
+        (raw_dir / f"{slug}.quelle.md").write_text(front + md)
+    except OSError as exc:
+        _log(f"[ingest]   (Roh-Notiz für {slug} nicht geschrieben: {exc})")
+        return None
+    return original or name
+
+
+def _emit(progress, message: str) -> None:
+    """Post a short progress one-liner, if a reporter is wired (never raises)."""
+    if progress:
+        try:
+            progress(message)
+        except Exception:  # noqa: BLE001 — a progress update must never break ingest
+            pass
+
+
+async def _aemit(progress, message: str) -> None:
+    """Async-safe progress emit: offload the (possibly blocking) send off the event loop.
+
+    The notifier's send is a synchronous urllib POST (up to WA_TIMEOUT seconds); doing
+    it on the loop would freeze a slow/hung send across the whole ingest. Run it in a
+    worker thread so a stalled relay can't stall the batch.
+    """
+    if progress:
+        await asyncio.to_thread(_emit, progress, message)
+
+
+async def run_ingest(
+    files: list[str],
+    vault: str,
+    model: str | None,
+    *,
+    folder: str | None = None,
+    integrate: bool | None = None,
+    concurrency: int | None = None,
+    verbose: bool = False,
+    progress=None,
+) -> dict[str, bool]:
+    """Ingest local FILES into a cluster: raw -> source notes -> (optional) concept wiki.
+
+    Exactly the deep-research pipeline minus stage 1 (no planner / no web discovery):
+    the supplied files ARE the sources. Returns {input_path: ok} so the caller knows
+    which files were filed (and may archive them) and which failed (to keep/retry).
+    """
+    folder = (folder or config.INGEST_FOLDER).strip("/")
+    integrate = config.INGEST_INTEGRATE if integrate is None else integrate
+    concurrency = max(1, concurrency or config.INGEST_CONCURRENCY)
+    topic = folder.replace("-", " ").replace("/", " ").strip() or "Eingang"
+    hub_name = f"{topic} — Map of Content"
+    raw_subdir = config.RESEARCH_DEEP_RAW_SUBDIR
+
+    # Unique, filename-safe slug per file — disambiguated against BOTH this batch AND
+    # the raw notes already on disk in the cluster, so re-dropping a file with the
+    # same basename (e.g. "scan.pdf" on two different days) never overwrites an
+    # earlier ingested raw/source note; it becomes scan-2 instead.
+    raw_dir = Path(vault) / folder / raw_subdir
+    seen: set[str] = set()
+    if raw_dir.is_dir():
+        for p in raw_dir.glob("*.md"):
+            seen.add(p.name[: -len(".quelle.md")] if p.name.endswith(".quelle.md") else p.stem)
+    src_list: list[dict] = []
+    for i, path in enumerate(files):
+        name = os.path.basename(path)
+        slug = _slugify(os.path.splitext(name)[0], f"dok-{i + 1}")
+        base, n = slug, 2
+        while slug in seen:
+            slug = f"{base}-{n}"
+            n += 1
+        seen.add(slug)
+        src_list.append({"slug": slug, "path": str(path), "name": name})
+
+    status: dict[str, bool] = {s["path"]: False for s in src_list}
+
+    # --- Stage A: write raw/<slug>.quelle.md per file (deterministic OCR/convert) ---
+    _log(f"[ingest] {len(src_list)} Datei(en) → {folder}/{raw_subdir}/ …")
+    raws: list[dict] = []
+    for src in src_list:
+        try:
+            stored = await asyncio.to_thread(_store_raw_local, folder, src["slug"], src["path"], vault)
+        except Exception as exc:  # noqa: BLE001 — one bad file must not abort the whole batch
+            _log(f"[ingest]   ✗ {src['name']}: {exc}")
+            stored = None
+        if stored is None:
+            _log(f"[ingest]   ✗ {src['name']}: nicht verarbeitet")
+            continue
+        raws.append(src)
+        await _aemit(progress, f"📄 {len(raws)}/{len(src_list)} durch OCR/Konvertierung: {src['name']}")
+    if not raws:
+        _log("[ingest] Keine Datei verarbeitet.")
+        await _aemit(progress, "⚠️ Keine Datei verarbeitet.")
+        return status
+
+    # --- Stage B: source-note fan-out (each agent reads its LOCAL raw, no fetch) ---
+    src_options = _research_options(
+        build_source_note_prompt(), vault, model, config.RESEARCH_DEEP_SOURCE_MAX_TURNS,
+        websearch=False, webfetch=False, ocr=False, write=True,
+    )
+    sem = asyncio.Semaphore(concurrency)
+    done = 0
+
+    async def analyse_one(src: dict) -> dict:
+        nonlocal done
+        note_path = f"{folder}/{raw_subdir}/{src['slug']}.md"
+        raw_path = f"{folder}/{raw_subdir}/{src['slug']}.quelle.md"
+        prompt = (
+            f"TOPIC: {topic}\n"
+            f"HUB note name: {hub_name}\n"
+            f"Write the note at this EXACT path: {note_path}\n"
+            f"RAW path (full already-extracted Markdown — Read it, do NOT fetch or OCR again): {raw_path}\n"
+            f"Source TITLE: {os.path.splitext(src['name'])[0]}\n"
+            f"Source URL: (lokale Datei: {src['name']})\n"
+            f"Source KIND: web\n"
+            f"THEME: Eingang\n"
+        )
+        async with sem:
+            ok = True
+            try:
+                await run_capture(prompt, src_options)
+            except Exception as exc:  # noqa: BLE001 — keep the fan-out going
+                ok = False
+                _log(f"[ingest]   ✗ {src['slug']}: {exc}")
+            done += 1
+            if ok:
+                _log(f"[ingest]   ✓ {done}/{len(raws)}  {src['slug']}")
+            return {**src, "path": note_path, "ok": ok}
+
+    results = await asyncio.gather(*(analyse_one(s) for s in raws))
+    written = [r for r in results if r["ok"]]
+    # `analyse_one` overwrites `path` with the NOTE path, so map success back to the
+    # original INPUT file path via the slug (src_list keeps the input path).
+    input_by_slug = {s["slug"]: s["path"] for s in src_list}
+    for r in written:
+        status[input_by_slug[r["slug"]]] = True
+
+    _log(f"[ingest] {len(written)}/{len(raws)} Quellnotizen geschrieben ({folder}/{raw_subdir}/).")
+    await _aemit(progress, f"📝 {len(written)}/{len(raws)} Quellnotizen geschrieben")
+    if not written:
+        return status
+
+    # --- Stage C: concept/wiki layer over THIS BATCH's source notes (optional) -----
+    # Integrate only the freshly written notes, NOT the whole growing cluster — so
+    # ingesting one more file is O(batch), not O(cluster), and earlier concept notes
+    # aren't needlessly re-churned. Concept notes + Hub update in place; run
+    # `anvil wiki <folder>` for a full cross-cluster re-synthesis on demand.
+    if integrate and written:
+        await _aemit(progress, f"📚 Konzept-Wiki wird über {len(written)} Quelle(n) gebaut…")
+        batch_notes = {r["slug"]: r["path"] for r in written}
+        await _integrate_cluster(
+            folder, topic, hub_name, ["Eingang"], vault, model,
+            concurrency=config.RESEARCH_DEEP_CONCEPT_CONCURRENCY,
+            source_notes=batch_notes,
+        )
+        await _aemit(progress, "📚 Konzept-Wiki & Hub aktualisiert")
+    return status
 
 
 def _cluster_source_notes(folder: str, vault: str) -> dict[str, str]:

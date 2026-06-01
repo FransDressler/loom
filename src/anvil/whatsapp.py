@@ -1,18 +1,17 @@
-"""WhatsApp inbox for ANVIL, via a WAHA relay.
+"""WhatsApp channel for ANVIL, via a WAHA relay.
 
-You message a thought into a dedicated WhatsApp chat; a periodic poll (systemd
-timer / cron) pulls new messages off the WAHA REST API, captures each one into
-the vault through the ANVIL agent, and replies with a short confirmation.
+A thin transport adapter over the shared listener engine (`anvil.listener`): this
+module only knows how to talk to WAHA (the WhatsApp HTTP API in Docker, linked to a
+WhatsApp account via QR — no Meta Business account needed). Everything else — noise
+filtering, attachment OCR/transcription, chat history, the send_attachment tool —
+lives in the engine and is identical across services.
 
-WAHA (https://waha.devlike.pro) runs the WhatsApp HTTP API in a Docker
-container, linked to a WhatsApp account via QR — exactly like WhatsApp Web. It
-needs no Meta Business account; a normal, free WhatsApp account works. Run WAHA
-on a dedicated number so you message *that* account from your own phone (the
-inbox skips its own outgoing messages, so you never see your text doubled).
-
-Image and PDF attachments are run through Mathpix OCR; audio/EPub through
-MarkItDown; texted-in links are expanded — the same paths as the iMessage inbox,
-shared via `anvil.inbox`.
+You message a thought into a dedicated WhatsApp chat; a periodic poll pulls new
+messages, captures each into the vault, and replies with a short confirmation.
+Photos/PDFs go through Mathpix OCR; voice notes (ogg/opus, transcoded via ffmpeg)
+and office/text files through MarkItDown; links are expanded. Run WAHA on a
+dedicated number and message that account from your phone (own sends are skipped),
+or set WA_CAPTURE_OWN to jot into your own "Message yourself" chat.
 
 Usage:
     anvil-whatsapp --check         verify the connection to WAHA + session state
@@ -23,30 +22,29 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import asyncio
+import base64
 import json
+import shutil
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import config, confirm, inbox, mathpix, mdconvert
-from .agent import build_options, run_capture
+from . import config, listener, mathpix, mdconvert
+from .listener import Channel, ChannelError
 
 # Re-fetch a little before the cursor so a boundary message is never missed.
 # WAHA timestamps are Unix seconds (unlike BlueBubbles' milliseconds).
 BACKTRACK_S = 60
 
-# Message types that carry no capturable content (system events, reactions,
-# call logs, encryption notices). Anything without a body or supported media is
-# skipped anyway, but naming these keeps the intent explicit.
+# Message types that carry no capturable content (system events, reactions, …).
 _SYSTEM_TYPES = {
     "e2e_notification", "notification_template", "gp2", "call_log",
     "reaction", "revoked", "protocol", "ciphertext", "notification",
 }
 
 
-class WahaError(RuntimeError):
+class WahaError(ChannelError):
     """A WAHA request failed or the server is unreachable."""
 
 
@@ -104,8 +102,8 @@ def fetch_messages(chat_id: str, after_s: int) -> list[dict]:
         params={"limit": config.WA_FETCH_LIMIT, "downloadMedia": "true"},
     )
     messages = payload if isinstance(payload, list) else []
-    # WAHA has no reliable server-side "after" filter across engines, so we fetch
-    # a window and filter on the cursor ourselves (the seen-id set dedupes too).
+    # WAHA has no reliable server-side "after" filter across engines, so we fetch a
+    # window and filter on the cursor ourselves (the seen-id set dedupes too).
     if after_s:
         messages = [m for m in messages if (m.get("timestamp") or 0) >= after_s]
     return messages
@@ -133,188 +131,115 @@ def send_text(chat_id: str, message: str) -> None:
     )
 
 
-# --- noise & attachment classification -----------------------------------------
+# --- outbound media (ANVIL -> you) ---------------------------------------------
 
-def _is_noise(msg: dict, text: str) -> bool:
-    """True for messages we must never capture (our own sends, system items, reactions)."""
-    # Outgoing messages are normally noise. With WA_CAPTURE_OWN (WAHA linked to
-    # your own number, jotting into the "Message yourself" chat) they ARE the
-    # input, so we keep them — the prefix check below still drops ANVIL's own
-    # ✅/📋 replies, so this never loops.
-    if msg.get("fromMe") and not config.WA_CAPTURE_OWN:
-        return True
-    if (msg.get("type") or "").lower() in _SYSTEM_TYPES:
-        return True
-    if inbox.is_own_message(text):  # always skip our own confirmation / proposal
-        return True
-    return False
-
-
-def _attachments(msg: dict) -> list[dict]:
-    """Normalise a WhatsApp message's media (at most one) into our attachment shape."""
-    media = msg.get("media")
-    if not isinstance(media, dict):
-        return []
-    url = media.get("url")
-    if not url:
-        return []
-    return [{
-        "url": url,
-        "mime": (media.get("mimetype") or "").lower(),
-        "name": media.get("filename") or "",
-        "id": str(msg.get("id") or ""),
-    }]
+def _send_media(endpoint: str, chat_id: str, data: bytes, mime: str, name: str,
+                caption: str = "", *, extra: dict | None = None) -> None:
+    """POST a file to a WAHA send-media endpoint as a raw base64 ``data`` blob."""
+    file_obj = {"mimetype": mime or "application/octet-stream",
+                "filename": name or "datei",
+                "data": base64.b64encode(data).decode()}
+    body = {"session": config.WA_SESSION, "chatId": chat_id, "file": file_obj}
+    if caption:
+        body["caption"] = caption
+    if extra:
+        body.update(extra)
+    _request("POST", endpoint, body=body)
 
 
-def _document_attachments(atts: list[dict]) -> list[dict]:
-    return [a for a in atts if inbox.is_document(a["mime"])]
+def send_image(chat_id: str, data: bytes, mime: str, name: str, caption: str = "") -> None:
+    _send_media("/api/sendImage", chat_id, data, mime, name, caption)
 
 
-def _media_attachments(atts: list[dict]) -> list[dict]:
-    return [a for a in atts if inbox.is_media(a["mime"])]
+def send_file(chat_id: str, data: bytes, mime: str, name: str, caption: str = "") -> None:
+    _send_media("/api/sendFile", chat_id, data, mime, name, caption)
 
 
-# --- replies & captures --------------------------------------------------------
-
-def _reply(chat: str, message: str) -> None:
-    """Send a confirmation/warning back into the chat, tagged so the next poll skips it."""
-    if not (config.WA_REPLY and message):
-        return
-    try:
-        send_text(chat, f"{inbox.CONFIRM_PREFIX} · {message}"[:1500])
-    except WahaError as exc:
-        print(f"reply failed: {exc}", file=sys.stderr, flush=True)
+def send_voice(chat_id: str, data: bytes, mime: str, name: str) -> None:
+    # WhatsApp voice notes must be OPUS-in-OGG; ask WAHA to convert anything not opus.
+    convert = "opus" not in (mime or "").lower()
+    _send_media("/api/sendVoice", chat_id, data, mime or "audio/ogg; codecs=opus", name,
+                extra={"convert": convert})
 
 
-def _name_of(att: dict) -> str:
-    return att["name"] or f"attachment-{att['id'][:8] or 'file'}"
+def _is_voice(mime: str, name: str) -> bool:
+    """True only for genuine WhatsApp voice audio (OPUS-in-OGG), not all audio."""
+    m = (mime or "").lower()
+    n = (name or "").lower()
+    return m.startswith(("audio/ogg", "audio/opus")) or n.endswith((".ogg", ".opus", ".oga"))
 
 
-def _capture_document(att: dict, caption: str, options, verbose: bool) -> str:
-    """Download a document attachment and hand it to the shared OCR/capture path."""
-    name = _name_of(att)
-    if verbose:
-        print(f"OCR document: {name!r} ({att['mime']})", file=sys.stderr, flush=True)
-    data = download_media(att["url"])
-    return inbox.capture_document(
-        data, name, att["mime"], caption, options, channel="WhatsApp", key=att["id"], verbose=verbose,
-    )
+def send_media(chat_id: str, data: bytes, mime: str, name: str, caption: str = "") -> None:
+    """Send `data` into the chat with the WAHA endpoint that fits its type.
+
+    JPEG photos go as images; genuine OPUS/OGG voice audio as a voice note;
+    everything else (other audio, PDFs, docx, non-JPEG images, video) as a document.
+    """
+    m = (mime or "").lower()
+    if m.startswith(("image/jpeg", "image/jpg")):
+        send_image(chat_id, data, mime, name, caption)
+    elif _is_voice(mime, name):
+        send_voice(chat_id, data, mime, name)
+        if caption:  # /api/sendVoice carries no caption — deliver it as a follow-up text.
+            send_text(chat_id, caption)
+    else:
+        send_file(chat_id, data, mime, name, caption)
 
 
-def _capture_media(att: dict, caption: str, options, verbose: bool) -> str:
-    """Download an audio/EPub attachment and hand it to the shared MarkItDown path."""
-    name = _name_of(att)
-    if verbose:
-        print(f"MarkItDown {mdconvert.kind_of(att['mime'])}: {name!r} ({att['mime']})",
-              file=sys.stderr, flush=True)
-    data = download_media(att["url"])
-    return inbox.capture_media(data, name, att["mime"], caption, options, channel="WhatsApp", key=att["id"])
+# --- channel adapter -----------------------------------------------------------
 
+class WhatsAppChannel(Channel):
+    name = "whatsapp"
+    label = "WhatsApp"
 
-def _capture_url(url: str, text: str, options, verbose: bool) -> str:
-    """Fetch a texted-in link (YouTube/web) via MarkItDown and file it into the vault."""
-    if verbose:
-        print(f"MarkItDown URL: {url}", file=sys.stderr, flush=True)
-    return inbox.capture_url(url, text, options, channel="WhatsApp")
+    @property
+    def chat_id(self) -> str:
+        return config.WA_CHAT_ID
 
+    @property
+    def capture_own(self) -> bool:
+        return config.WA_CAPTURE_OWN
 
-# --- poll ----------------------------------------------------------------------
+    @property
+    def can_send_media(self) -> bool:
+        # Disabled in own-number mode: a file ANVIL sends is echoed back as our own
+        # message and would be re-captured. Standard (dedicated-number) mode is fine.
+        return config.WA_SEND_MEDIA and not config.WA_CAPTURE_OWN
 
-def poll(verbose: bool = False) -> int:
-    chat = config.WA_CHAT_ID
-    if not chat:
-        raise WahaError("ANVIL_WA_CHAT_ID is not set — run with --list-chats to find it.")
+    @property
+    def reply_enabled(self) -> bool:
+        return config.WA_REPLY
 
-    state = inbox.load_state("whatsapp")
-    entry = state.get(chat, {})
-    last_ts: int = entry.get("last_ts", 0)
-    seen: list[str] = entry.get("seen", [])
-    seen_set = set(seen)
+    def fetch(self, cursor: int) -> list[dict]:
+        return fetch_messages(self.chat_id, max(0, cursor - BACKTRACK_S) if cursor else 0)
 
-    messages = fetch_messages(chat, max(0, last_ts - BACKTRACK_S) if last_ts else 0)
-    options = build_options(config.VAULT_PATH, config.MODEL)
+    def normalize(self, raw: dict) -> dict:
+        media = raw.get("media") if isinstance(raw.get("media"), dict) else None
+        atts: list[dict] = []
+        if media and media.get("url"):
+            atts = [{
+                "key": media["url"],
+                "id": str(raw.get("id") or ""),
+                "mime": (media.get("mimetype") or "").lower(),
+                "name": media.get("filename") or "",
+            }]
+        return {
+            "id": str(raw.get("id") or ""),
+            "_sort": int(raw.get("timestamp") or 0),
+            "text": raw.get("body") or "",
+            "from_me": bool(raw.get("fromMe")),
+            "system": (raw.get("type") or "").lower() in _SYSTEM_TYPES,
+            "attachments": atts,
+        }
 
-    captured = 0
-    for msg in sorted(messages, key=lambda m: m.get("timestamp") or 0):
-        mid = str(msg.get("id") or "")
-        ts = msg.get("timestamp") or 0
-        if ts > last_ts:
-            last_ts = ts
-        if not mid or mid in seen_set:
-            continue
-        seen_set.add(mid)
-        seen.append(mid)
+    def download(self, att: dict) -> bytes:
+        return download_media(att["key"])
 
-        text = (msg.get("body") or "").strip()
-        if _is_noise(msg, text):
-            continue
+    def send_text(self, text: str) -> None:
+        send_text(self.chat_id, text)  # module-level transport (not this method)
 
-        atts = _attachments(msg)
-        docs = _document_attachments(atts)
-        media = _media_attachments(atts) if config.MARKITDOWN else []
-        handled_attachment = False
-
-        # Images / PDFs -> Mathpix OCR.
-        for att in docs:
-            if not mathpix.is_configured():
-                _reply(chat, "Mathpix ist nicht konfiguriert — Dokument übersprungen.")
-                break
-            try:
-                reply = _capture_document(att, text, options, verbose)
-            except (WahaError, mathpix.MathpixError) as exc:
-                print(f"document capture failed: {exc}", file=sys.stderr, flush=True)
-                _reply(chat, f"⚠️ {_name_of(att)}: {exc}")
-                continue
-            captured += 1
-            handled_attachment = True
-            _reply(chat, reply)
-
-        # Audio / EPub -> MarkItDown.
-        for att in media:
-            try:
-                reply = _capture_media(att, text, options, verbose)
-            except (WahaError, mdconvert.MarkItDownError) as exc:
-                print(f"media capture failed: {exc}", file=sys.stderr, flush=True)
-                _reply(chat, f"⚠️ {_name_of(att)}: {exc}")
-                continue
-            captured += 1
-            handled_attachment = True
-            _reply(chat, reply)
-
-        if handled_attachment or not text:
-            continue
-
-        # A reply to a pending confirm proposal ("1 3" / "alle" / "keine") —
-        # deletions, and later mail/GitHub/calendar actions — is consumed here
-        # and executed via its registered handler instead of captured as a note.
-        handled, summary = confirm.try_resolve(text)
-        if handled:
-            _reply(chat, summary)
-            captured += 1
-            continue
-
-        # A texted-in link -> fetch via MarkItDown (YouTube transcript / article)
-        # and file the content, rather than saving a bare URL.
-        url = mdconvert.find_url(text) if (config.MARKITDOWN and config.MARKITDOWN_URLS) else None
-        if url:
-            try:
-                reply = _capture_url(url, text, options, verbose)
-                captured += 1
-                _reply(chat, reply)
-                continue
-            except mdconvert.MarkItDownError as exc:
-                if verbose:
-                    print(f"url convert failed ({exc}); capturing as text", file=sys.stderr, flush=True)
-
-        if verbose:
-            print(f"capturing: {text[:80]!r}", file=sys.stderr, flush=True)
-        reply = asyncio.run(run_capture(text, options))
-        captured += 1
-        _reply(chat, reply)
-
-    state[chat] = {"last_ts": last_ts, "seen": seen[-inbox.SEEN_LIMIT:]}
-    inbox.save_state("whatsapp", state)
-    return captured
+    def send_media(self, data: bytes, mime: str, name: str, caption: str = "") -> None:
+        send_media(self.chat_id, data, mime, name, caption)
 
 
 # --- CLI -----------------------------------------------------------------------
@@ -322,7 +247,7 @@ def poll(verbose: bool = False) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="anvil-whatsapp",
-        description="WhatsApp inbox for ANVIL via a WAHA relay.",
+        description="WhatsApp channel for ANVIL via a WAHA relay.",
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--poll", action="store_true", help="Fetch and capture new messages, then exit.")
@@ -337,8 +262,15 @@ def main() -> None:
             print(f"WAHA OK at {config.WA_URL} (session {config.WA_SESSION!r}: {status})")
             if status and status != "WORKING":
                 print("  session is not WORKING — scan the QR in the WAHA dashboard to link it.")
-            mp = "configured" if mathpix.is_configured() else "not configured (attachments ignored)"
+            mp = "configured" if mathpix.is_configured() else "not configured (images stored, not OCR'd)"
             print(f"Mathpix OCR: {mp}")
+            print(f"MarkItDown (voice/audio/office files): {'on' if config.MARKITDOWN else 'off'}"
+                  f" · voice language {config.AUDIO_LANG}")
+            print(f"Outbound media (send_attachment): {'on' if WhatsAppChannel().can_send_media else 'off'}")
+            print(f"Chat history context: {'on' if config.CHAT_HISTORY else 'off'}"
+                  f" (last {config.CHAT_HISTORY_TURNS} turns)")
+            if config.MARKITDOWN and not shutil.which("ffmpeg"):
+                print("  ⚠️  ffmpeg not found — voice notes (ogg/opus) cannot be transcribed.")
         elif args.list_chats:
             for chat in list_chats():
                 cid = chat.get("id") or "?"
@@ -347,10 +279,10 @@ def main() -> None:
                 name = chat.get("name") or "(unnamed)"
                 print(f"{cid}\t{name}")
         elif args.poll:
-            n = poll(verbose=args.verbose)
+            n = listener.run_poll(WhatsAppChannel(), verbose=args.verbose)
             if args.verbose:
                 print(f"captured {n} message(s)", file=sys.stderr)
-    except WahaError as exc:
+    except ChannelError as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)
 

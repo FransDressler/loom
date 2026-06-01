@@ -22,6 +22,11 @@ RESET = "\033[0m"
 
 ALLOWED_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"]
 
+# Built-in tools the sandboxed agent deliberately does NOT get. Added only when
+# config.FULL_AGENT is on (see listener._full_agent_escalate) — Bash is the one that
+# turns the chat agent into unrestricted local execution.
+FULL_AGENT_TOOLS = ["Bash", "NotebookEdit", "TodoWrite", "Task"]
+
 
 def build_options(
     vault: str,
@@ -49,8 +54,10 @@ def build_options(
         permission_mode="acceptEdits",
         model=model,
         # Keep the agent self-contained: don't inherit the user's global CLAUDE.md
-        # or MCP config, which are tuned for coding rather than note-taking.
-        setting_sources=None,
+        # or MCP config, which are tuned for coding rather than note-taking. The SDK
+        # loads ALL setting sources when this is None; [] is the documented isolation
+        # mode (see ClaudeAgentOptions.setting_sources).
+        setting_sources=[],
     )
 
 

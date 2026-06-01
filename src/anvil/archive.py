@@ -156,7 +156,7 @@ async def _summarize(convo_text: str) -> str | None:
         allowed_tools=[],
         permission_mode="default",
         model=SUMMARY_MODEL,
-        setting_sources=None,
+        setting_sources=[],  # [] = SDK isolation; None would load global settings/CLAUDE.md
         env={GUARD_ENV: "1"},
         max_turns=1,
     )

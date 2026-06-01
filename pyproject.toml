@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "claude-agent-sdk>=0.2.87",
+    "mcp>=1.2",
     "markitdown[audio-transcription,youtube-transcription]>=0.1.6",
     "starlette>=0.40",
     "uvicorn>=0.30",
@@ -16,7 +17,13 @@ anvil = "anvil.cli:main"
 anvil-archive = "anvil.archive:main"
 anvil-imessage = "anvil.imessage:main"
 anvil-whatsapp = "anvil.whatsapp:main"
+anvil-telegram = "anvil.telegram:main"
+anvil-discord = "anvil.discord:main"
 anvil-cleaner = "anvil.cleaner:main"
+anvil-builder = "anvil.builder_inbox:main"
+anvil-ingest = "anvil.ingest:main"
+anvil-tasks = "anvil.tasks:main"
+anvil-mcp = "anvil.mcp_server:main"
 anvil-web = "anvil.web:main"
 
 [build-system]

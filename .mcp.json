@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "anvil": {
+      "command": "/home/frans/anvil-brain/.venv/bin/anvil-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}

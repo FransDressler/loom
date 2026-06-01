@@ -1,0 +1,22 @@
+[Unit]
+Description=ANVIL builder-inbox worker — work queued complaints down and revise notes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/anvil-brain
+# The agent spawns the `claude` CLI, which lives in ~/.local/bin — not on a
+# user service's default PATH, so set it explicitly.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Secrets and ANVIL_* settings live here, chmod 600. The leading "-" makes the
+# file optional so the unit still loads if it is missing.
+EnvironmentFile=-%h/.config/anvil/env
+# --watch polls <builder-inbox>/todo/ every ANVIL_BUILDER_POLL_INTERVAL seconds
+# (default 10) for as long as the project runs.
+ExecStart=%h/anvil-brain/.venv/bin/anvil-builder --watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
