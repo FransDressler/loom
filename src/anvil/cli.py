@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from datetime import datetime
 
 from . import config
 from .agent import build_options, run_once, run_repl, run_research
@@ -21,6 +22,8 @@ from .research import (
 )
 from .retrieve import run_retrieve
 from .tasks import SKILLS, run_tasks_once, run_tasks_watch, submit_task
+from .anki import list_decks, run_anki_export, run_anki_generate, run_anki_sync
+from .mail import gmail_oauth_setup, gmail_status, send_email
 
 
 def main() -> None:
@@ -250,6 +253,88 @@ def main() -> None:
     tasks_p.add_argument("--model", default=config.RESEARCH_MODEL, help="Model override for the queued flows.")
     tasks_p.add_argument("-v", "--verbose", action="store_true", help="Log activity to stderr.")
 
+    anki_p = sub.add_parser(
+        "anki",
+        help="Anki flashcard generation: generate decks from vault folders and export .apkg files.",
+    )
+    anki_sub = anki_p.add_subparsers(dest="anki_command")
+
+    anki_gen = anki_sub.add_parser(
+        "generate",
+        help="Generate (or update) an Anki deck from all wiki notes in a vault folder.",
+    )
+    anki_gen.add_argument("folder", help="Vault folder to scan (e.g. Materialwissenschaft/).")
+    anki_gen.add_argument(
+        "--count", type=int, default=None, metavar="N",
+        help=f"Cards per note (default: ANVIL_ANKI_COUNT_PER_NOTE, currently {config.ANKI_COUNT_PER_NOTE}).",
+    )
+    anki_gen.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+    anki_gen.add_argument("--model", default=config.ANKI_MODEL, help="Model override for card generation.")
+    anki_gen.add_argument("-v", "--verbose", action="store_true", help="Show progress.")
+
+    anki_exp = anki_sub.add_parser(
+        "export",
+        help="Export a stored deck to an Anki-importable .apkg file.",
+    )
+    anki_exp.add_argument("slug", help="Deck slug (same as the folder name, lowercased/slugified).")
+    anki_exp.add_argument(
+        "--output", default=None, metavar="DIR_OR_PATH",
+        help="Output directory or full path for the .apkg file (default: current directory).",
+    )
+    anki_exp.add_argument("--deck-name", default=None, metavar="NAME", help="Anki deck name (default: slug).")
+    anki_exp.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+
+    anki_st = anki_sub.add_parser(
+        "status",
+        help="List stored Anki decks and their card counts.",
+    )
+    anki_st.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+
+    anki_sync = anki_sub.add_parser(
+        "sync",
+        help="Sync a stored deck to AnkiWeb (download collection, merge, upload).",
+    )
+    anki_sync.add_argument("slug", help="Deck slug (folder name, lowercased/slugified).")
+    anki_sync.add_argument("--deck-name", default=None, metavar="NAME",
+                           help="Anki deck name on AnkiWeb (default: folder name).")
+    anki_sync.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+    anki_sync.add_argument("-v", "--verbose", action="store_true", help="Show progress.")
+
+    mail_p = sub.add_parser(
+        "mail",
+        help="E-Mails von ANVIL senden — Gmail API (OAuth2) oder SMTP. Subcommands: auth, status, send, check.",
+    )
+    mail_sub = mail_p.add_subparsers(dest="mail_command")
+
+    mail_auth = mail_sub.add_parser(
+        "auth",
+        help="Einmalige Gmail OAuth2-Anmeldung (Browser öffnet sich).",
+    )
+    mail_auth.add_argument(
+        "--credentials",
+        required=True,
+        metavar="client_secrets.json",
+        help="Pfad zur client_secrets.json aus der Google Cloud Console.",
+    )
+
+    mail_sub.add_parser("status", help="Status der Gmail-API-Konfiguration anzeigen.")
+
+    mail_send = mail_sub.add_parser("send", help="Eine E-Mail senden.")
+    mail_send.add_argument("--to", default=None,
+                           help="Empfänger (Standard: ANVIL_SMTP_TO).")
+    mail_send.add_argument("--subject", required=True, help="Betreff.")
+    mb = mail_send.add_mutually_exclusive_group(required=True)
+    mb.add_argument("--body", default=None, help="Text (inline).")
+    mb.add_argument("--body-file", default=None, metavar="FILE",
+                    help="Text aus Datei lesen (- für stdin).")
+    mail_send.add_argument("--html", action="store_true", help="Body als HTML senden.")
+    mail_send.add_argument("--from", dest="from_addr", default=None,
+                           help="Absender-Adresse (nur SMTP).")
+
+    mail_check = mail_sub.add_parser("check", help="Test-Mail senden um die Konfiguration zu prüfen.")
+    mail_check.add_argument("--to", default=None,
+                            help="Empfänger der Test-Mail (Standard: ANVIL_SMTP_TO).")
+
     queue = sub.add_parser(
         "queue",
         help="Enqueue a heavy ANVIL skill for the task worker to run (same queue the chat agent uses).",
@@ -370,6 +455,82 @@ def main() -> None:
         else:
             n = asyncio.run(run_tasks_once(args.vault, args.model, verbose=args.verbose))
             print(f"{n} Aufgabe(n) ausgeführt.")
+        return
+
+    if args.command == "anki":
+        vault = getattr(args, "vault", config.VAULT_PATH)
+        if args.anki_command == "generate":
+            summary = asyncio.run(
+                run_anki_generate(args.folder, vault, args.model, args.count, verbose=args.verbose)
+            )
+            print(summary)
+        elif args.anki_command == "export":
+            try:
+                out = run_anki_export(args.slug, vault, args.output, args.deck_name)
+                print(f"✅ Exportiert: {out}")
+            except ValueError as exc:
+                print(f"Fehler: {exc}", file=sys.stderr)
+                sys.exit(2)
+        elif args.anki_command == "status":
+            decks = list_decks(vault)
+            if not decks:
+                print("Keine gespeicherten Decks.")
+            else:
+                for d in decks:
+                    ts = datetime.fromtimestamp(d["updated_at"] / 1000).strftime("%Y-%m-%d") if d.get("updated_at") else "?"
+                    print(f"  {d['slug']:40s}  {d['card_count']:4d} Karten  ({ts})")
+        elif args.anki_command == "sync":
+            try:
+                summary = asyncio.run(
+                    run_anki_sync(args.slug, vault, args.deck_name, verbose=args.verbose)
+                )
+                print(summary)
+            except (ValueError, RuntimeError) as exc:
+                print(f"Fehler: {exc}", file=sys.stderr)
+                sys.exit(2)
+        else:
+            anki_p.print_help()
+        return
+
+    if args.command == "mail":
+        import sys as _sys
+        if args.mail_command == "auth":
+            try:
+                gmail_oauth_setup(args.credentials)
+            except RuntimeError as exc:
+                print(f"Fehler: {exc}", file=_sys.stderr)
+                _sys.exit(1)
+        elif args.mail_command == "status":
+            print(gmail_status())
+        elif args.mail_command == "send":
+            if args.body_file:
+                if args.body_file == "-":
+                    body = _sys.stdin.read()
+                else:
+                    with open(args.body_file, encoding="utf-8") as fh:
+                        body = fh.read()
+            else:
+                body = args.body
+            try:
+                send_email(args.subject, body, to=args.to, from_addr=args.from_addr, html=args.html)
+                print(f"✅ Gesendet an {args.to or config.SMTP_TO}")
+            except RuntimeError as exc:
+                print(f"Fehler: {exc}", file=_sys.stderr)
+                _sys.exit(1)
+        elif args.mail_command == "check":
+            recipient = args.to or config.SMTP_TO
+            try:
+                send_email(
+                    "ANVIL — E-Mail-Test",
+                    "Diese Test-Mail wurde von ANVIL gesendet. ✅",
+                    to=recipient,
+                )
+                print(f"✅ Test-Mail an {recipient} gesendet.")
+            except RuntimeError as exc:
+                print(f"Fehler: {exc}", file=_sys.stderr)
+                _sys.exit(1)
+        else:
+            mail_p.print_help()
         return
 
     if args.command == "queue":

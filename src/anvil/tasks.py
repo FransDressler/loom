@@ -39,10 +39,11 @@ SKILLS: tuple[str, ...] = (
     "research", "deep-research", "ingest",
     "schema", "glossary", "sync", "wiki",
     "digest", "lint", "normalize",
-    "code",  # headless Claude Code run (see code_session); usually queued via run_code_task
+    "anki",   # generate Anki flashcards from a vault folder; argument = folder path
+    "code",   # headless Claude Code run (see code_session); usually queued via run_code_task
 )
 # Skills that take a free-text argument (a topic / a cluster folder / a code task).
-SKILLS_WITH_ARG = {"research", "deep-research", "wiki", "code"}
+SKILLS_WITH_ARG = {"research", "deep-research", "wiki", "anki", "code"}
 # Skills the generic `queue_skill` tool may enqueue. "code" is EXCLUDED on purpose:
 # it runs Claude Code with full permissions and is reachable only via the dedicated,
 # CODE_SESSIONS-gated run_code_task tool — so queue_skill can't bypass that gate.
@@ -206,6 +207,9 @@ async def _run_skill(skill: str, argument: str, vault: str, model: str | None, v
     elif skill == "wiki":
         from .research import run_wiki_integration
         await run_wiki_integration(argument or config.INGEST_FOLDER, vault, model)
+    elif skill == "anki":
+        from .anki import run_anki_generate
+        return await run_anki_generate(argument, vault, model, verbose=verbose)
     elif skill in ("digest", "lint", "normalize"):
         # cleaner's passes are synchronous (they asyncio.run internally), so run them
         # in a worker thread — calling asyncio.run from this running loop would fail.

@@ -10,6 +10,9 @@ dependencies = [
     "markitdown[audio-transcription,youtube-transcription]>=0.1.6",
     "starlette>=0.40",
     "uvicorn>=0.30",
+    "zstandard>=0.25.0",
+    "google-auth>=2.30",
+    "google-auth-oauthlib>=1.2",
 ]
 
 [project.scripts]

@@ -90,6 +90,15 @@ BB_TIMEOUT: int = int(os.environ.get("ANVIL_BB_TIMEOUT", "30"))
 # as fromMe=false and ANVIL's sends are fromMe=true, so capturing own would only
 # re-ingest ANVIL's own traffic. Mirrors WhatsApp's ANVIL_WA_CAPTURE_OWN.
 BB_CAPTURE_OWN: bool = os.environ.get("ANVIL_BB_CAPTURE_OWN", "1").lower() not in ("0", "false", "no", "")
+# `anvil-imessage --listen` runs the poll loop in-process and lets an incoming "/stop"
+# HARD-ABORT a running (even stuck) task: it watches for /stop while a poll/agent run is
+# in flight and kills that run's whole process group. Seconds between polls, and how
+# often to check for /stop while one is running.
+BB_POLL_EVERY: int = int(os.environ.get("ANVIL_IMESSAGE_POLL_EVERY", "15"))
+BB_STOP_CHECK_EVERY: int = int(os.environ.get("ANVIL_IMESSAGE_STOP_INTERVAL", "3"))
+# The literal control word that triggers the hard abort (case-insensitive, whole message).
+# Never captured as a note. Set empty to disable the /stop handling entirely.
+STOP_COMMAND: str = os.environ.get("ANVIL_STOP_COMMAND", "/stop").strip().lower()
 
 # --- WhatsApp inbox via a WAHA relay -------------------------------------------
 # WAHA (https://waha.devlike.pro) runs the WhatsApp HTTP API in Docker, linked to
@@ -176,7 +185,7 @@ RESEARCH_DEEP_MIN_SOURCES: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_MIN_SOU
 RESEARCH_DEEP_MAX_SOURCES: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_MAX_SOURCES", "30"))
 # How many per-source sub-agents run at once. Web fetches parallelize well; keep
 # this modest so OCR (in-process) and rate limits stay sane.
-RESEARCH_DEEP_CONCURRENCY: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_CONCURRENCY", "4"))
+RESEARCH_DEEP_CONCURRENCY: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_CONCURRENCY", "10"))
 # Turn budgets per stage: each source sub-agent fetches one source + writes one
 # note; the planner does broad discovery; synthesis reads all notes + builds.
 RESEARCH_DEEP_SOURCE_MAX_TURNS: int = int(os.environ.get("ANVIL_RESEARCH_DEEP_SOURCE_MAX_TURNS", "20"))
@@ -365,6 +374,37 @@ INGEST_CONCURRENCY: int = int(os.environ.get("ANVIL_INGEST_CONCURRENCY", str(RES
 # member count or the total uncompressed size is exceeded.
 INGEST_ZIP_MAX_MEMBERS: int = int(os.environ.get("ANVIL_INGEST_ZIP_MAX_MEMBERS", "300"))
 INGEST_ZIP_MAX_TOTAL_MB: int = int(os.environ.get("ANVIL_INGEST_ZIP_MAX_TOTAL_MB", "500"))
+
+
+# --- Outbound e-mail (anvil mail / notify channel "email") ---------------------
+# Send e-mails via SMTP — works with Gmail App Passwords, Fastmail, any SMTP relay.
+# Gmail quick-start:
+#   1. Google Account → Security → 2-Step Verification → App Passwords → create one.
+#   2. Set ANVIL_SMTP_USER=you@gmail.com, ANVIL_SMTP_PASSWORD=<app-password>.
+#      ANVIL_SMTP_HOST / PORT / USE_SSL / USE_STARTTLS default to Gmail's TLS settings.
+SMTP_HOST: str = os.environ.get("ANVIL_SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT: int = int(os.environ.get("ANVIL_SMTP_PORT", "587"))
+# Gmail uses STARTTLS on port 587; set ANVIL_SMTP_USE_SSL=1 + port 465 for SSL.
+SMTP_USE_STARTTLS: bool = os.environ.get("ANVIL_SMTP_USE_STARTTLS", "1").lower() not in ("0", "false", "no", "")
+SMTP_USE_SSL: bool = os.environ.get("ANVIL_SMTP_USE_SSL", "0").lower() not in ("0", "false", "no", "")
+SMTP_USER: str = os.environ.get("ANVIL_SMTP_USER", os.environ.get("ANVIL_USER", ""))
+SMTP_PASSWORD: str = os.environ.get("ANVIL_SMTP_PASSWORD", os.environ.get("ANVIL_PASSWORD", ""))
+# Optional: explicit From address. Defaults to SMTP_USER when empty.
+SMTP_FROM: str = os.environ.get("ANVIL_SMTP_FROM", "")
+# Default recipient for progress notifications and `anvil mail send` (without --to).
+SMTP_TO: str = os.environ.get("ANVIL_SMTP_TO", os.environ.get("ANVIL_TO", ""))
+SMTP_TIMEOUT: int = int(os.environ.get("ANVIL_SMTP_TIMEOUT", "30"))
+
+
+# --- Anki deck generation (anvil anki) -----------------------------------------
+# Generates Q&A flashcards from vault wiki notes and exports .apkg files importable
+# into Anki. Decks are stored as JSON under <vault>/<ANKI_DECK_DIR>/<slug>.json.
+# Model for card generation. None => RESEARCH_MODEL => account default.
+ANKI_MODEL: str | None = os.environ.get("ANVIL_ANKI_MODEL") or None
+# Vault subfolder where generated deck JSON files live.
+ANKI_DECK_DIR: str = os.environ.get("ANVIL_ANKI_DECK_DIR", "anki")
+# How many cards to generate per note when using `anvil anki generate`.
+ANKI_COUNT_PER_NOTE: int = int(os.environ.get("ANVIL_ANKI_COUNT_PER_NOTE", "5"))
 
 
 # --- Skill task queue (anvil-tasks) --------------------------------------------

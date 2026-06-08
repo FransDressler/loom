@@ -54,16 +54,27 @@ alive()  { local p; p="$(pid_of "$1")"; [ -n "$p" ] && kill -0 "$p" 2>/dev/null;
 start_bg() {  # $1 = name ; rest = command (run from ANVIL_DIR, detached)
   local name="$1"; shift
   if alive "$name"; then echo "  • $name läuft schon (pid $(pid_of "$name"))"; return; fi
-  ( cd "$ANVIL_DIR" && nohup "$@" >>"$LOG_DIR/$name.log" 2>&1 & echo $! >"$RUN_DIR/$name.pid" )
-  echo "  ✅ $name gestartet (pid $(pid_of "$name"))  → $LOG_DIR/$name.log"
+  # `exec` makes the backgrounded subshell BECOME the command, so $! is reliably the
+  # command's own pid (caffeinate/uv), not a wrapper subshell — fixes duplicate starts.
+  ( cd "$ANVIL_DIR" && exec nohup "$@" >>"$LOG_DIR/$name.log" 2>&1 ) &
+  local pid=$!
+  echo "$pid" >"$RUN_DIR/$name.pid"
+  echo "  ✅ $name gestartet (pid $pid)  → $LOG_DIR/$name.log"
+}
+
+# Kill a whole process tree (children first), so no orphaned poll/agent survives a stop.
+kill_tree() {  # $1 = pid ; $2 = signal (default TERM)
+  local pid="$1" sig="${2:-TERM}" child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do kill_tree "$child" "$sig"; done
+  kill -"$sig" "$pid" 2>/dev/null || true
 }
 
 stop_one() {
   local name="$1" p; p="$(pid_of "$name")"
   if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then
-    pkill -P "$p" 2>/dev/null || true   # children first (uv -> python, loop -> uv)
-    kill "$p" 2>/dev/null || true
-    echo "  ⏹  $name gestoppt (pid $p)"
+    kill_tree "$p" TERM        # graceful, whole tree (uv -> python -> poll -> agent)
+    kill_tree "$p" KILL        # hammer any straggler that ignored TERM
+    echo "  ⏹  $name gestoppt (pid $p + Baum)"
   fi
   rm -f "$RUN_DIR/$name.pid"
 }
@@ -89,7 +100,9 @@ cmd_start() {
 
   echo "== iMessage-Listener =="
   if ( cd "$ANVIL_DIR" && uv run anvil-imessage --check ) >/dev/null 2>&1; then
-    start_bg imessage bash -c "cd '$ANVIL_DIR'; while true; do uv run anvil-imessage --poll; sleep $POLL_EVERY; done"
+    # --listen does the poll loop in-process AND lets an incoming /stop hard-abort a
+    # running (even stuck) task by killing that poll's process group.
+    start_bg imessage uv run anvil-imessage --listen
   else
     echo "  –  imessage übersprungen: BlueBubbles nicht erreichbar / nicht konfiguriert (prüfe: anvil-imessage --check)"
   fi

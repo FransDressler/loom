@@ -36,6 +36,12 @@ def _channel(name: str):
     if name == "imessage":
         from .imessage import IMessageChannel
         return IMessageChannel()
+    if name == "email":
+        from .mail import EmailChannel
+        return EmailChannel()
+    if name == "gmail":
+        from .mail import GmailApiChannel
+        return GmailApiChannel()
     return None
 
 
