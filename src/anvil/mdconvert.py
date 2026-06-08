@@ -245,16 +245,17 @@ def convert_bytes(data: bytes, mime: str, name: str) -> str:
             raise MarkItDownError("Keine verständliche Sprache in der Audiodatei erkannt.")
         return transcript
 
-    from markitdown import StreamInfo
-
-    info = StreamInfo(
-        mimetype=_clean(mime) or None,
-        extension=_extension(mime, name) or None,
-        filename=name or None,
-    )
     try:
+        from markitdown import StreamInfo
+
+        info = StreamInfo(
+            mimetype=_clean(mime) or None,
+            extension=_extension(mime, name) or None,
+            filename=name or None,
+        )
         result = _engine().convert_stream(io.BytesIO(data), stream_info=info)
-    except Exception as exc:  # noqa: BLE001 — normalize every backend failure
+    except Exception as exc:  # noqa: BLE001 — normalize every backend failure, incl. a
+        # missing markitdown/onnxruntime (Intel-mac, where only the audio path is available)
         raise MarkItDownError(f"{type(exc).__name__}: {exc}") from exc
     text = (getattr(result, "text_content", "") or "").strip()
     if not text:
