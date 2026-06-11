@@ -32,6 +32,25 @@
   eines `retrieve`-Laufs (MCP ist request/response) + Live-Test des MCP-Pfads in der CLI.
 - ✅ **Live-Test** Baustein 1+2 gegen den echten Vault: Retrieval (covered + scope-miss),
   Builder arbeitet die auto-gefilte Beschwerde ab, halluziniert bei Source-Miss nicht.
+- ✅ **Baustein 5 — Dynamisches Context-Management** (2026-06-11): Der „dynamisch
+  nachwachsende Kontext" aus Baustein 4 hat jetzt Mechanik statt nur Hoffnung:
+  (a) **Memory-Flächen** `ANVIL — Profil & Präferenzen` / `ANVIL — Aktuelle Projekte`
+  (budgetiert, `stand:`-Datum) via `prompt._facts()` in jeden Agenten injiziert
+  (`ANVIL_MEMORY_NOTES`); (b) **`anvil context-hint`** — deterministischer
+  UserPromptSubmit-Hook (<1 s, kein LLM, fail-open, `ANVIL_CONTEXT_HINT`): letztes
+  retrieve-Topic+Alter (`retrieve_state.json`, pro Session gekeyt) + Titel-Treffer als
+  Wegweiser → der Hauptagent merkt Themenwechsel und ruft `retrieve` selbst neu;
+  (c) **Schlaf-Konsolidierung** (`src/anvil/consolidate.py`, Cleaner-Pass,
+  `ANVIL_CLEANER_CONSOLIDATE`): destilliert dirty Chats in Episoden
+  (`conversations/<jahr>/`) BEVOR sie aus dem 16er-Fenster fallen, pflegt die
+  Memory-Flächen + `ops/checkpoints/`; Dry-Run default, günstigeres Modell via
+  `ANVIL_CONSOLIDATE_MODEL`, Retention in den STATE-Trash (`ANVIL_CHAT_RETENTION_DAYS`).
+  Kontext-Politik (Memory-first, Retrieve-Disziplin, Belief-Updates) steht in der
+  Schema-Note + Vault-`CLAUDE.md`. Tests: `tests/test_context.py` (11, grün).
+  Nebenbefund repariert: `events.py` + `agent._publish` fehlten im Working Tree
+  (aus Bytecode rekonstruiert), `research.py` fehlten `_scoped_folder` /
+  `_resolve_hub_name` / `_find_by_source_hash` / `source_hash` (aus Tests
+  rekonstruiert) — Suite wieder vollständig grün.
 
 ---
 

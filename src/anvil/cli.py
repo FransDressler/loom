@@ -10,6 +10,7 @@ from . import config
 from .agent import build_options, run_once, run_repl, run_research
 from .builder_inbox import run_builder_once, run_builder_watch, submit_complaint
 from .cleaner import run_clean, run_digest, run_lint, run_normalize
+from .feynman import run_feynman_once, run_feynman_watch
 from .ingest import run_ingest_once, run_ingest_watch
 from .research import (
     build_research_options,
@@ -21,6 +22,32 @@ from .research import (
 )
 from .retrieve import run_retrieve
 from .tasks import SKILLS, run_tasks_once, run_tasks_watch, submit_task
+
+
+def run_context_hint(vault: str, session: str) -> None:
+    """UserPromptSubmit-hook body: hook-JSON on stdin -> hint on stdout. Fail-open.
+
+    This sits in EVERY turn's hot path, so it guards itself three ways: the
+    feature-flag gate, a hard sub-second alarm, and a bare return on ANY error.
+    A lost hint costs one extra retrieve; a hanging hook would cost every turn.
+    """
+    if not config.CONTEXT_HINT:
+        return
+    import json
+    import os
+    import signal
+
+    from . import context_hint
+
+    signal.signal(signal.SIGALRM, lambda *_: os._exit(0))
+    signal.setitimer(signal.ITIMER_REAL, 0.9)
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+        hint = context_hint.hint_text(str(payload.get("prompt") or ""), vault, session=session)
+        if hint:
+            print(hint)
+    except Exception:  # noqa: BLE001 — fail-open by contract
+        return
 
 
 def main() -> None:
@@ -201,6 +228,18 @@ def main() -> None:
     )
     retrieve.add_argument("-v", "--verbose", action="store_true", help="Show tool activity and run stats.")
 
+    hint = sub.add_parser(
+        "context-hint",
+        help="Claude Code UserPromptSubmit hook: read the hook JSON from stdin and print a "
+        "deterministic ≤300-token context hint (last retrieve topic + matching note titles). "
+        "No LLM, <1s, fail-open; silent unless ANVIL_CONTEXT_HINT=1.",
+    )
+    hint.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+    hint.add_argument(
+        "--session", default="claude-code",
+        help="Session key for the retrieve-staleness line (default: claude-code).",
+    )
+
     complain = sub.add_parser(
         "complain",
         help="File a complaint into the builder-inbox by hand: something the vault should cover "
@@ -240,6 +279,24 @@ def main() -> None:
     ingest.add_argument("--model", default=config.RESEARCH_MODEL, help="Model override for the ingest agents.")
     ingest.add_argument("-v", "--verbose", action="store_true", help="Log activity to stderr.")
 
+    feynman = sub.add_parser(
+        "feynman",
+        help="Feynman learning mode: drop voice recordings explaining a subject into "
+        "ANVIL_FEYNMAN_DIR; an examiner agent (loaded with the subject's vault cluster) "
+        "corrects you and asks follow-ups. Sessions become chat protocols in the vault.",
+    )
+    fey_group = feynman.add_mutually_exclusive_group(required=True)
+    fey_group.add_argument("--watch", action="store_true", help="Keep polling the recordings folder every ANVIL_FEYNMAN_POLL_INTERVAL seconds.")
+    fey_group.add_argument("--poll", action="store_true", help="Process the recordings folder once, then exit (for a systemd timer).")
+    feynman.add_argument(
+        "--subject", default=config.FEYNMAN_SUBJECT,
+        help="Subject = vault cluster folder (e.g. AQC); a '<subject>__' filename prefix overrides per recording.",
+    )
+    feynman.add_argument("--new", action="store_true", help="Start a fresh session (ignore a resumable previous one).")
+    feynman.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+    feynman.add_argument("--model", default=config.FEYNMAN_MODEL, help="Model override for the examiner agent.")
+    feynman.add_argument("-v", "--verbose", action="store_true", help="Log activity to stderr.")
+
     tasks_p = sub.add_parser(
         "tasks",
         help="Run the skill task-queue worker: execute queued heavy flows (deep research, ingest, "
@@ -257,6 +314,32 @@ def main() -> None:
     queue.add_argument("skill", choices=SKILLS, help="The skill to queue.")
     queue.add_argument("argument", nargs="*", help="Topic (research/deep-research) or folder (wiki); empty otherwise.")
     queue.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+
+    doctor_p = sub.add_parser(
+        "doctor",
+        help="Diagnose: Features, Kanäle, Dienste, Queues, Budgets. "
+        "Read-only; --fix repariert nur Reparierbares (nicht-destruktiv).",
+    )
+    doctor_p.add_argument("--fix", action="store_true", help="Reparierbares reparieren (nie destruktiv).")
+    doctor_p.add_argument("--no-probes", action="store_true", help="Netz-Probes überspringen.")
+
+    sub.add_parser("status", help="Schneller read-only Status-Snapshot (ohne Netz-Probes).")
+
+    jobs_p = sub.add_parser(
+        "jobs",
+        help="Geplante Prompts (ANVIL_JOBS): list/create/pause/resume/remove/run.",
+    )
+    jobs_p.add_argument(
+        "action", nargs="?", default="list",
+        choices=["list", "create", "pause", "resume", "remove", "run"],
+    )
+    jobs_p.add_argument("job_id", nargs="?", help="Job-Id (12-hex) für pause/resume/remove/run.")
+    jobs_p.add_argument("--name", default="")
+    jobs_p.add_argument(
+        "--schedule", default="",
+        help='DSL: "once 2026-06-12 09:00" | "every 30m" | "daily 07:30"',
+    )
+    jobs_p.add_argument("--prompt", default="")
 
     # A bare invocation captures a free-form thought / question (or opens the REPL).
     # argparse can't disambiguate a free-form prompt from a subcommand name when both
@@ -295,6 +378,19 @@ def main() -> None:
         return
 
     args = parser.parse_args(raw)
+
+    # Lazy imports (bewusste Abweichung von der Top-Import-Konvention oben):
+    # hält die cli.py-Importzeit und die Konfliktfläche zu den parallel gebauten
+    # Modulen doctor.py/jobs.py klein.
+    if args.command in ("doctor", "status"):
+        from .doctor import main_cli as doctor_cli
+
+        sys.exit(doctor_cli(args))
+
+    if args.command == "jobs":
+        from .jobs import main_cli as jobs_cli
+
+        sys.exit(jobs_cli(args))
 
     if args.command == "clean":
         run_clean(assume_yes=args.yes, dry_run=args.dry_run, garden=args.garden, verbose=args.verbose)
@@ -339,6 +435,10 @@ def main() -> None:
         asyncio.run(run_retrieve(" ".join(args.question), args.vault, args.model, args.verbose))
         return
 
+    if args.command == "context-hint":
+        run_context_hint(args.vault, args.session)
+        return
+
     if args.command == "complain":
         detail = " ".join(args.detail)
         rel = submit_complaint(
@@ -362,6 +462,26 @@ def main() -> None:
         else:
             n = asyncio.run(run_ingest_once(args.vault, args.model, verbose=args.verbose))
             print(f"{n} Datei(en) eingearbeitet.")
+        return
+
+    if args.command == "feynman":
+        if args.watch:
+            asyncio.run(
+                run_feynman_watch(
+                    args.subject, args.vault, args.model,
+                    force_new=args.new, verbose=args.verbose,
+                )
+            )
+        else:
+            from .notify import build_notifier
+
+            n = asyncio.run(
+                run_feynman_once(
+                    args.subject, args.vault, args.model,
+                    force_new=args.new, verbose=args.verbose, progress=build_notifier(),
+                )
+            )
+            print(f"{n} Aufnahme(n) beantwortet.")
         return
 
     if args.command == "tasks":

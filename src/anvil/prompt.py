@@ -11,13 +11,16 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from . import config
+from . import config, events
 
 # The vault-resident schema note is injected verbatim into every agent's system
 # prompt (capped). It is authoritative for conventions; _VAULT_FACTS is only the
 # baseline that applies before the file exists.
-_SCHEMA_MAX_CHARS = 8000
+# The schema note outgrew the old 8000 cap (~8.6k chars in 2026-06), which silently
+# cut its tail out of every prompt — watch the prompt_built telemetry when tuning.
+_SCHEMA_MAX_CHARS = 10000
 _GLOSSARY_MAX_CHARS = 6000
+_MEMORY_MAX_CHARS = 3000  # per memory surface (profile / current projects)
 
 _VAULT_FACTS = """\
 You operate directly on an Obsidian vault — a folder of plain Markdown files — \
@@ -637,6 +640,8 @@ vault ALREADY holds (existing notes and their `raw/` source notes). Work autonom
 # Hard limits
 - Touch only the notes this complaint concerns. Confirm nothing destructive — just revise.
 - Do NOT touch the complaint file itself, `.obsidian/`, `.trash/`, or system notes.
+- Never write a negative claim about a tool or source ("X is broken / does not work")
+  into a note — it hardens into a stale refusal long after the defect is fixed.
 - Finish with a 2–4 line RESOLUTION: which notes you changed and what you added/fixed (or
   that research was requested/needed). This reply is appended to the complaint as its record.
 """
@@ -653,6 +658,57 @@ _BUILDER_SOURCE_MISS_ON = """\
    `request_research` tool with a precise `topic` (and `sources` — any candidate sources the
    complaint names) so a later cycle researches it and creates the missing source notes. Say in
    your reply that you requested research and on what topic."""
+
+
+# --- Feynman learning mode: the examiner/tutor over one subject cluster ---------
+# The user EXPLAINS a subject in their own words (spoken, transcribed); the agent
+# checks the explanation against the subject's vault material, corrects errors,
+# names the most important gap and asks exactly ONE follow-up question per round.
+
+_FEYNMAN_PROMPT = """\
+You are ANVIL in FEYNMAN mode — an examiner and tutor for ONE subject the user is \
+learning. {vault_facts}
+
+# Setting
+The user studies a subject whose material lives in the vault. They explain it to you
+IN THEIR OWN WORDS (Feynman technique). The first message carries a SUBJECT-MATERIAL
+context block — the cluster's Hub, concept notes and source notes. That material is
+your ground truth as examiner; the conversation so far is the running session.
+Explanations arrive as TRANSCRIBED SPEECH: expect filler words, run-on sentences and
+transcription artifacts (a garbled technical term usually means the transcriber, not
+the user, got it wrong — silently read past it). Judge CONTENT only, never wording.
+
+# Each round
+1. CHECK the explanation against the subject material. Verify a detail with
+   Read/Grep/Glob in the vault when the context block alone can't settle it.
+2. ACKNOWLEDGE briefly what was correct and precise (one or two lines, no flattery).
+3. CORRECT every factual ERROR explicitly: state what the user said, what the vault
+   material says instead, and cite the note as [[Note Name]]. Vague or hand-wavy
+   passages ("irgendwie", circular definitions) are named as such — a vague
+   explanation is the Feynman signal for a gap in understanding.
+4. Name the most important GAP: what a good explanation of this topic would have
+   covered but theirs did not.
+5. End with EXACTLY ONE targeted follow-up question — the question that best probes
+   the weakest spot. One question, not a list; the user answers by voice.
+
+When the user signals the end of the session ("fertig", "Fazit", "Zusammenfassung",
+or asks how they did): give a session summary instead — what they can explain
+solidly, which errors came up, which gaps remain, and what to review next (with
+[[note]] links). No follow-up question then.
+
+# Hard limits
+- READ-ONLY: your tools are Read/Glob/Grep. NEVER write or edit a note — an examiner
+  changes no knowledge.
+- Ground every correction in the vault material and cite the note; when the vault
+  itself does not cover a point, say so instead of inventing facts.
+- Reply in the user's language (German). Keep math as $…$ / $$…$$.
+- Stay compact: a round's reply fits in ~250 words. Strict on substance, encouraging
+  in tone.
+"""
+
+
+def build_feynman_prompt() -> str:
+    return _FEYNMAN_PROMPT.format(vault_facts=_facts())
 
 
 def build_retrieve_prompt() -> str:
@@ -680,6 +736,20 @@ def load_schema_text() -> str:
 def load_glossary_text() -> str:
     """Return the vault's glossary / controlled-vocabulary note (capped), or ''."""
     return _load_capped(config.GLOSSARY_FILE, _GLOSSARY_MAX_CHARS)
+
+
+def load_profile_text() -> str:
+    """The user-profile memory surface (capped), or '' (absent or feature off)."""
+    if not config.MEMORY_NOTES:
+        return ""
+    return _load_capped(config.PROFILE_FILE, _MEMORY_MAX_CHARS)
+
+
+def load_projects_text() -> str:
+    """The current-projects memory surface (capped), or '' (absent or feature off)."""
+    if not config.MEMORY_NOTES:
+        return ""
+    return _load_capped(config.PROJECTS_FILE, _MEMORY_MAX_CHARS)
 
 
 def _facts() -> str:
@@ -710,6 +780,31 @@ def _facts() -> str:
             "- Stößt du auf ein klares neues Synonym-/Übersetzungspaar, das fehlt, ergänze es im Glossar.\n\n"
             f"{glossary}"
         )
+    profile = load_profile_text()
+    projects = load_projects_text()
+    if profile or projects:
+        facts += (
+            "\n\n# Gedächtnis-Flächen (im Vault gepflegt — budgetiert, mit `stand:`-Datum)\n"
+            "Wer der Nutzer ist und woran er gerade arbeitet. Aktueller Stand, keine ewige "
+            "Wahrheit: bei Widerspruch gilt die Originalnotiz. Dauerhafte neue Fakten und "
+            "Entscheidungen gehören SOFORT in den Vault (Memory-first); beim Aktualisieren "
+            "dieser Flächen kürzen statt anhäufen — das Budget steht im Notizkopf. "
+            "Nutzer-Korrekturen und erkennbarer Frust («merk dir das») sind Speicher-Signale "
+            "erster Klasse; Defekt-Claims über Tools/Quellen und transiente Fehler speicherst "
+            "du NICHT."
+        )
+        if profile:
+            facts += f"\n\n## Profil & Präferenzen (»{config.PROFILE_FILE}«)\n{profile}"
+        if projects:
+            facts += f"\n\n## Aktuelle Projekte (»{config.PROJECTS_FILE}«)\n{projects}"
+    # One best-effort feed line per prompt build: the data basis for tuning the
+    # caps above (and for spotting silent truncation like the 2026-06 schema case).
+    events.publish(
+        "log",
+        f"prompt_built schema={len(schema)} glossar={len(glossary)} "
+        f"profil={len(profile)} projekte={len(projects)}",
+        source="prompt",
+    )
     return facts
 
 

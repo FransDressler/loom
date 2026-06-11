@@ -78,6 +78,15 @@ check_channel anvil-telegram anvil-telegram.timer "telegram listener"
 check_channel anvil-discord  anvil-discord.timer  "discord listener"
 check_channel anvil-imessage anvil-imessage.timer "imessage listener"
 
+# --- fitness (Oura/Strava → Tagestrainingsplan): timer only when authed --------
+# `--check` passes once at least one service has OAuth tokens (anvil-fitness --auth).
+if [ -x "$VENV/anvil-fitness" ] && "$VENV/anvil-fitness" --check >/dev/null 2>&1; then
+  if enable_now anvil-fitness.timer; then started+=("fitness timer   (Oura/Strava → Tagesplan & Analysen)"); else skipped+=("fitness timer (start failed)"); fi
+else
+  disable_now anvil-fitness.timer
+  skipped+=("fitness timer (nicht autorisiert — anvil-fitness --auth oura|strava)")
+fi
+
 echo
 echo "=== gestartet ==="
 if [ ${#started[@]} -eq 0 ]; then echo "  (nichts)"; else printf '  ✅ %s\n' "${started[@]}"; fi

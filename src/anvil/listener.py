@@ -27,8 +27,9 @@ from pathlib import Path
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from . import config, confirm, inbox, ingest, mathpix, mdconvert, tasks
+from . import chunking, cleaner, config, confirm, inbox, ingest, mathpix, mdconvert, tasks
 from .agent import FULL_AGENT_TOOLS, build_options
+from .paths import PROTECTED_DIRS as _PROTECTED_DIRS
 from .prompt import build_skills_overview
 
 
@@ -52,6 +53,12 @@ class Channel(ABC):
     can_send_media: bool = False
     #: Whether to send confirmation replies back into the chat.
     reply_enabled: bool = True
+    #: Längen-Budget einer ausgehenden Nachricht, gemessen mit `len_fn`. Die 4000
+    #: decken iMessage und WhatsApp; Telegram (4096, UTF-16) und Discord (2000)
+    #: überschreiben es in ihren Adaptern.
+    max_message_len: int = 4000
+    #: Längenmaß des Dienstes (Telegram zählt UTF-16-Units statt Codepoints).
+    len_fn = staticmethod(len)
 
     @property
     @abstractmethod
@@ -91,6 +98,18 @@ class Channel(ABC):
         """Send a file into the chat. Only required when `can_send_media` is True."""
         raise NotImplementedError(f"{self.label} cannot send media")
 
+    def send_chunked(self, message: str, prefix: str = "") -> None:
+        """Sende `message` fence-bewusst gestückelt statt gekappt (zentraler Sendepunkt).
+
+        KRITISCH: `prefix` steht auf JEDEM Chunk und zählt ins Limit —
+        inbox.is_own_message erkennt eigene Sendungen per startswith(Tag); ein
+        Folge-Chunk ohne Tag würde bei capture_own als neue User-Nachricht
+        eingefangen (Capture-Schleife).
+        """
+        for chunk in chunking.split_message(message, self.max_message_len,
+                                            len_fn=self.len_fn, prefix=prefix):
+            self.send_text(chunk)
+
     def is_noise(self, norm: dict, text: str) -> bool:
         """True for messages to never capture (system items, our own sends, our replies)."""
         if norm.get("system"):
@@ -107,7 +126,6 @@ class Channel(ABC):
 
 # --- outbound media: a vault-sandboxed send_attachment tool ---------------------
 
-_PROTECTED_DIRS = {".obsidian", ".trash", ".git", "node_modules"}
 OUTBOX_TOOL = "mcp__anvil_outbox__send_attachment"
 
 
@@ -214,6 +232,11 @@ def build_inbox_options(channel: Channel):
         from . import code_session
         extra_tools.append(code_session.CODE_TOOL)
         mcp_servers["anvil_code"] = code_session.build_code_server()
+    if config.JOBS and channel.name != "discord":
+        # Discord ist untrusted (Dritte können posten) — dort bewusst kein schedule_job.
+        from . import jobs
+        extra_tools.append(jobs.JOBS_TOOL)
+        mcp_servers["anvil_jobs"] = jobs.build_jobs_server(channel)
     if extra_tools:
         options = build_options(config.VAULT_PATH, config.MODEL, extra_tools=extra_tools, mcp_servers=mcp_servers)
     else:
@@ -223,9 +246,16 @@ def build_inbox_options(channel: Channel):
     return options
 
 
-def context_block(channel: Channel, turns: list[dict]) -> str:
+def context_block(channel: Channel, turns: list[dict], text: str = "") -> str:
     """Per-message context: skills overview + send-capability hint + chat history."""
     parts: list[str] = []
+    if config.CONTEXT_HINT and text:
+        # Same deterministic pointers the Claude-Code hook injects (fail-open).
+        from . import context_hint
+
+        hint = context_hint.hint_text(text, session=f"chat:{channel.name}")
+        if hint:
+            parts.append(hint)
     if config.INBOX_SKILLS:
         parts.append(build_skills_overview())
     if channel.can_send_media:
@@ -340,9 +370,26 @@ def _reply(channel: Channel, message: str) -> None:
     if not (channel.reply_enabled and message):
         return
     try:
-        channel.send_text(f"{inbox.CONFIRM_PREFIX} · {message}"[:1500])
+        channel.send_chunked(message, prefix=f"{inbox.CONFIRM_PREFIX} · ")
     except ChannelError as exc:
         print(f"reply failed: {exc}", file=sys.stderr, flush=True)
+
+
+def _send_tagged(channel: Channel, message: str) -> None:
+    """Sende einen bereits getaggten Ausgang (Confirm-/Cleaner-Proposal) gechunkt.
+
+    Der vorhandene Eigen-Tag wird als Chunk-Präfix weitergereicht, damit auch
+    Folge-Chunks von is_own_message erkannt werden; Chunk 1 beginnt damit exakt
+    wie die ungestückelte Nachricht (Präfix-Semantik bleibt erhalten).
+    """
+    tag = next((p for p in (confirm.PROPOSAL_PREFIX, cleaner.PROPOSAL_PREFIX, inbox.CONFIRM_PREFIX)
+                if message.startswith(p)), "")
+    if not tag:
+        # Defensiv: nie ungetaggt senden — Folge-Chunks ohne Eigen-Tag würden im
+        # capture_own-Modus von is_own_message als neue Nachrichten eingefangen.
+        _reply(channel, message)
+        return
+    channel.send_chunked(message[len(tag):], prefix=tag)
 
 
 def _remember(turns: list[dict], atts: list[dict], text: str, replies: list[str]) -> None:
@@ -357,7 +404,7 @@ def _remember(turns: list[dict], atts: list[dict], text: str, replies: list[str]
 
 def _handle_message(channel: Channel, norm: dict, text: str, options, turns: list[dict], verbose: bool) -> int:
     """Process one (already de-noised) message: attachments, confirm, url, or text."""
-    context = context_block(channel, turns)
+    context = context_block(channel, turns, text)
     # Progress one-liners go back into THIS chat (only when replies are enabled), so
     # you see "📄 durch Mathpix OCR" while a PDF is still being filed.
     progress = (lambda m: _reply(channel, m)) if channel.reply_enabled else None
@@ -473,9 +520,10 @@ def run_poll(channel: Channel, verbose: bool = False) -> int:
         raise ChannelError(f"{channel.label}: no chat configured — see setup / --list-chats.")
 
     # So a confirm proposal raised during this poll is texted back over THIS channel
-    # (not hardwired to iMessage). The sender takes (chat, message); the channel's
-    # send_text only needs the message (its chat is fixed).
-    confirm.register_sender(chat, lambda _chat, message: channel.send_text(message))
+    # (not hardwired to iMessage). The sender takes (chat, message); the channel only
+    # needs the message (its chat is fixed). _send_tagged chunkt lange Proposals und
+    # hält dabei den Proposal-Tag auf jedem Chunk (kein API-Fehler, kein Capture-Loop).
+    confirm.register_sender(chat, lambda _chat, message: _send_tagged(channel, message))
 
     state = inbox.load_state(channel.name)
     entry = state.get(chat, {})

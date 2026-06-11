@@ -21,7 +21,8 @@ STATE_DIR: str = os.environ.get(
 #   tasks/   open work items agents pick up and resolve
 #   reports/ generated reports & audit logs (daily briefing, action audit)
 # Paths are relative to the vault root; agents read/write here instead of any
-# external queue. Override the names if they clash with existing folders.
+# external queue. Override the names if they clash with existing folders. In the
+# ops/-layout these live under ops/ (set e.g. ANVIL_INBOX_DIR="ops/inbox").
 INBOX_DIR: str = os.environ.get("ANVIL_INBOX_DIR", "inbox")
 TASKS_DIR: str = os.environ.get("ANVIL_TASKS_DIR", "tasks")
 REPORTS_DIR: str = os.environ.get("ANVIL_REPORTS_DIR", "reports")
@@ -59,6 +60,31 @@ DIGEST_FILE: str = os.environ.get("ANVIL_DIGEST_FILE", "ANVIL — Digest.md")
 # `anvil glossary` builds/refreshes it; `anvil normalize` applies it to notes.
 # Protected system note. Path is relative to the vault root.
 GLOSSARY_FILE: str = os.environ.get("ANVIL_GLOSSARY_FILE", "ANVIL — Glossar & Synonyme.md")
+
+# Two vault-resident MEMORY surfaces (memory blocks on disk, Letta-style): who the
+# user is, and what he is currently working on. Injected (capped) into every agent's
+# system prompt — gated by ANVIL_MEMORY_NOTES (context-management section below) —
+# so each fresh session starts warm. Maintained by Frans in Obsidian AND, once
+# ANVIL_CLEANER_CONSOLIDATE is on, by the cleaner's consolidate pass (within the
+# cap). Protected system notes; paths are relative to the vault root.
+PROFILE_FILE: str = os.environ.get("ANVIL_PROFILE_FILE", "ANVIL — Profil & Präferenzen.md")
+PROJECTS_FILE: str = os.environ.get("ANVIL_PROJECTS_FILE", "ANVIL — Aktuelle Projekte.md")
+
+# The vault's Home-Index note: the landing page that links the area MOCs and the
+# system notes. Cleaner deletion-protection and the research hub lookup key on
+# this filename, so it lives in config instead of a hardcoded prefix string —
+# renaming the note means updating this in lockstep. Protected system note. Path
+# is relative to the vault root.
+HOME_FILE: str = os.environ.get(
+    "ANVIL_HOME_FILE", "ANVIL — Archive for Notes, Visions, Ideas, Learning.md"
+)
+
+# PARA-style archive folder: finished projects and superseded-but-keepable
+# content move here as whole folders (archiv/<year>/<name>/). Read-only for
+# agents — no fold-ins or rewrites, excluded from the default retrieval scope —
+# but NOT a substitute for .trash: real deletions still go through the confirm
+# queue. Path is relative to the vault root.
+ARCHIV_DIR: str = os.environ.get("ANVIL_ARCHIV_DIR", "archiv")
 
 # --- iMessage inbox via a BlueBubbles relay on a Mac ---------------------------
 # BlueBubbles (https://bluebubbles.app) runs a small server on a Mac with an
@@ -137,6 +163,10 @@ DESCRIBE_MAX_IMAGES: int = int(os.environ.get("ANVIL_DESCRIBE_MAX_IMAGES", "20")
 # `anvil research "<topic>"` researches a topic (web + PDFs via Mathpix) and builds
 # a Hub (MOC) note plus linked sub-notes. PDFs the agent discovers or the user
 # supplies are run through the same OCR path as iMessage attachments.
+# Base folder (relative to the vault root) under which research creates new topic
+# cluster folders, so deep-research clusters land deterministically under
+# wissen/<slug> instead of at the vault's top level. Empty => vault root.
+RESEARCH_BASE_DIR: str = os.environ.get("ANVIL_RESEARCH_BASE_DIR", "wissen")
 # Folder inside the vault where research figures and downloaded PDFs are stored.
 RESEARCH_ASSET_DIR: str = os.environ.get("ANVIL_RESEARCH_ASSET_DIR", DOC_ASSET_DIR)
 # Model for the research/synthesis agent. None => account default. A capable model
@@ -286,6 +316,36 @@ CLEANER_NORMALIZE: bool = _flag("ANVIL_CLEANER_NORMALIZE")
 CLEANER_NORMALIZE_MAX_TURNS: int = int(os.environ.get("ANVIL_CLEANER_NORMALIZE_MAX_TURNS", "40"))
 
 
+# --- Dynamisches Context-Management (Memory-Flächen, Hint-Hook, Konsolidierung) --
+# The vault is the long-term memory; sessions are disposable working windows.
+# Three independently-flagged pieces (all OFF by default):
+#   1. ANVIL_MEMORY_NOTES   — inject the PROFILE_FILE/PROJECTS_FILE memory surfaces
+#      (capped) into every agent prompt via prompt._facts().
+#   2. ANVIL_CONTEXT_HINT   — `anvil context-hint`: a deterministic (<1s, no-LLM)
+#      UserPromptSubmit hook that injects the last retrieve topic + note-title
+#      matches as pointers, so the main agent notices topic shifts and re-retrieves.
+#   3. ANVIL_CLEANER_CONSOLIDATE — a sleep-time consolidate pass in the daily
+#      cleaner: distills chat histories into episode notes + the memory surfaces,
+#      then (optionally) prunes idle, already-distilled chat histories.
+MEMORY_NOTES: bool = _flag("ANVIL_MEMORY_NOTES", "0")
+CONTEXT_HINT: bool = _flag("ANVIL_CONTEXT_HINT", "0")
+# Max note-title matches the hint lists per turn.
+CONTEXT_HINT_MAX_NOTES: int = int(os.environ.get("ANVIL_CONTEXT_HINT_MAX_NOTES", "5"))
+
+CLEANER_CONSOLIDATE: bool = _flag("ANVIL_CLEANER_CONSOLIDATE", "0")
+# Consolidation is summarisation under tight guardrails — a cheaper model does it
+# well; the main session and retrieve stay on the strong model. None => MODEL.
+CONSOLIDATE_MODEL: str | None = os.environ.get("ANVIL_CONSOLIDATE_MODEL") or None
+CONSOLIDATE_MAX_TURNS: int = int(os.environ.get("ANVIL_CONSOLIDATE_MAX_TURNS", "30"))
+# Dry-run (default ON): the consolidate agent writes a report into ops/reports/
+# instead of touching notes. Run a week like this, check the reports, then arm it.
+CONSOLIDATE_DRY_RUN: bool = _flag("ANVIL_CONSOLIDATE_DRY_RUN", "1")
+# Retention: after a successful NON-dry consolidate run, chat histories idle for
+# more than this many days are pruned — moved into STATE_DIR/trash/ (recoverable),
+# never hard-deleted. 0 disables retention entirely.
+CHAT_RETENTION_DAYS: int = int(os.environ.get("ANVIL_CHAT_RETENTION_DAYS", "0"))
+
+
 # --- Retrieval-Rework: adaptiver Retrieval-Agent + Builder-Beschwerde-Inbox -----
 # See docs/retrieval-rework.md. `anvil retrieve "<frage>"` launches an agent that
 # decides BREADTH (how many notes) and DEPTH (how many linked notes to follow)
@@ -327,8 +387,9 @@ BUILDER_ALLOW_RESEARCH: bool = _flag("ANVIL_BUILDER_ALLOW_RESEARCH", "0")
 # is moved OUT of the drop folder into <dump>/.processed/ (recoverable).
 # The drop folder lives OUTSIDE the vault by default so raw dumps never hit Obsidian.
 INGEST_DIR: str = os.path.expanduser(os.environ.get("ANVIL_INGEST_DIR", "~/anvil-dump"))
-# Vault cluster folder the ingested sources accumulate in (relative to the vault).
-INGEST_FOLDER: str = os.environ.get("ANVIL_INGEST_FOLDER", "Eingang")
+# Vault folder the ingested sources accumulate in (relative to the vault). With
+# the eingang/-layout this is the vault's single content inbox.
+INGEST_FOLDER: str = os.environ.get("ANVIL_INGEST_FOLDER", "eingang")
 # Seconds between drop-folder checks in the long-running `anvil-ingest --watch`.
 INGEST_POLL_INTERVAL: int = int(os.environ.get("ANVIL_INGEST_POLL_INTERVAL", "10"))
 # Only process a file once its mtime has been stable this long — avoids grabbing a
@@ -339,7 +400,7 @@ INGEST_BATCH: int = int(os.environ.get("ANVIL_INGEST_BATCH", "10"))
 # After the raw + source-note layer, also build the concept/wiki layer (stages
 # 3–5: concepts across the sources, fold into notes, Hub). On by default. Turn off
 # for unrelated dumps where a cross-source synthesis adds little (run `anvil wiki
-# Eingang` by hand later if you want it).
+# eingang` by hand later if you want it).
 INGEST_INTEGRATE: bool = _flag("ANVIL_INGEST_INTEGRATE")
 # How many source sub-agents run at once (defaults to the deep-research budget).
 INGEST_CONCURRENCY: int = int(os.environ.get("ANVIL_INGEST_CONCURRENCY", str(RESEARCH_DEEP_CONCURRENCY)))
@@ -411,6 +472,126 @@ CODE_RESULT_MAX_CHARS: int = int(os.environ.get("ANVIL_CODE_RESULT_MAX_CHARS", "
 FULL_AGENT: bool = _flag("ANVIL_FULL_AGENT", "0")
 
 
+# --- Feynman-Lernmodus (anvil feynman) ------------------------------------------
+# You explain a subject in your own words (Feynman technique) as voice recordings
+# dropped into a watch folder; ANVIL loads the subject's whole vault cluster, checks
+# the explanation against it, corrects you and asks ONE targeted follow-up per round.
+# Each session becomes a chat-format Markdown protocol under FEYNMAN_SESSION_FOLDER.
+# The watch folder lives OUTSIDE the vault (like the ingest drop folder).
+FEYNMAN_DIR: str = os.path.expanduser(os.environ.get("ANVIL_FEYNMAN_DIR", "~/anvil-feynman"))
+# Vault folder (relative to the root) the session protocols are written into. Kept
+# separate from the knowledge clusters so the cleaner/wiki never mistakes a protocol
+# for a source note.
+FEYNMAN_SESSION_FOLDER: str = os.environ.get("ANVIL_FEYNMAN_SESSION_FOLDER", "lernsessions")
+# Default subject (cluster folder) when a recording's filename carries no
+# "<subject>__" prefix and no --subject was given.
+FEYNMAN_SUBJECT: str = os.environ.get("ANVIL_FEYNMAN_SUBJECT", "")
+# Model for the examiner agent. None => RETRIEVE_MODEL => RESEARCH_MODEL => default.
+FEYNMAN_MODEL: str | None = os.environ.get("ANVIL_FEYNMAN_MODEL") or None
+# Turn budget per session (the examiner mostly answers from its context block).
+FEYNMAN_MAX_TURNS: int = int(os.environ.get("ANVIL_FEYNMAN_MAX_TURNS", "30"))
+# Hard cap on the subject-context block injected at session start (characters).
+FEYNMAN_CONTEXT_MAX_CHARS: int = int(os.environ.get("ANVIL_FEYNMAN_CONTEXT_MAX_CHARS", "60000"))
+# Seconds between watch-folder checks / mtime-stable settle time before a grab.
+FEYNMAN_POLL_INTERVAL: int = int(os.environ.get("ANVIL_FEYNMAN_POLL_INTERVAL", "5"))
+FEYNMAN_SETTLE_SECONDS: int = int(os.environ.get("ANVIL_FEYNMAN_SETTLE_SECONDS", "3"))
+# Recordings closer together than this (hours) continue the SAME session (memory
+# kept via SDK resume); a longer gap starts a fresh session + protocol.
+FEYNMAN_SESSION_GAP_H: int = int(os.environ.get("ANVIL_FEYNMAN_SESSION_GAP_H", "8"))
+# Transcription backend: faster-whisper (local, offline, far better for long German
+# explanations with technical vocabulary) when installed — falls back to the
+# markitdown/Google-Web-Speech path (mdconvert.transcribe_audio_bytes) otherwise.
+# Install with: uv sync --extra feynman (or pip install faster-whisper).
+FEYNMAN_USE_WHISPER: bool = _flag("ANVIL_FEYNMAN_USE_WHISPER")
+FEYNMAN_WHISPER_MODEL: str = os.environ.get("ANVIL_FEYNMAN_WHISPER_MODEL", "medium")
+FEYNMAN_WHISPER_DEVICE: str = os.environ.get("ANVIL_FEYNMAN_WHISPER_DEVICE", "auto")
+FEYNMAN_WHISPER_COMPUTE: str = os.environ.get("ANVIL_FEYNMAN_WHISPER_COMPUTE", "auto")
+# Spoken language of the recordings (a Whisper language code, not a BCP-47 tag).
+FEYNMAN_LANG: str = os.environ.get("ANVIL_FEYNMAN_LANG", "de")
+
+
+# --- Fitness: Oura-Ring + Strava → Tagestrainingsplan ---------------------------
+# A daily coach: a timer job (`anvil-fitness --daily`) syncs Oura (readiness, sleep,
+# HRV) and Strava (workouts) into a local SQLite store, computes training-load
+# metrics (TSS/CTL/ATL/TSB) deterministically, and once the morning readiness data
+# is in, a coach agent writes today's plan as a dated note under <vault>/<FITNESS_DIR>/
+# and pushes a short summary to the notify channel. The module is OFF until the
+# OAuth apps are configured AND `anvil-fitness --auth oura|strava` was run once.
+#
+# Oura: create an OAuth2 app at https://developer.ouraring.com (personal access
+# tokens were retired in Dec 2025); redirect URI http://localhost:<FITNESS_OAUTH_PORT>/callback.
+OURA_CLIENT_ID: str = os.environ.get("ANVIL_OURA_CLIENT_ID", "")
+OURA_CLIENT_SECRET: str = os.environ.get("ANVIL_OURA_CLIENT_SECRET", "")
+OURA_API_URL: str = os.environ.get("ANVIL_OURA_API_URL", "https://api.ouraring.com")
+OURA_AUTH_URL: str = os.environ.get("ANVIL_OURA_AUTH_URL", "https://cloud.ouraring.com/oauth/authorize")
+OURA_TIMEOUT: int = int(os.environ.get("ANVIL_OURA_TIMEOUT", "30"))
+# Which Oura collections the sync pulls (comma-separated v2 usercollection names).
+OURA_COLLECTIONS: str = os.environ.get(
+    "ANVIL_OURA_COLLECTIONS",
+    "daily_readiness,daily_sleep,sleep,daily_activity,daily_stress,daily_resilience,daily_spo2,workout",
+)
+# Re-fetch a trailing window of days on every sync: Oura revises documents after
+# later ring syncs, so yesterday's data is not final the first time we see it.
+OURA_TRAILING_DAYS: int = int(os.environ.get("ANVIL_OURA_TRAILING_DAYS", "3"))
+
+# Strava: create an API app at https://www.strava.com/settings/api with callback
+# domain "localhost". NOTE: since June 2026 Standard-Tier API access requires an
+# active Strava subscription. The base URL moves to https://www.api-v3.strava.com
+# on 2027-06-01 — override here when that lands.
+STRAVA_CLIENT_ID: str = os.environ.get("ANVIL_STRAVA_CLIENT_ID", "")
+STRAVA_CLIENT_SECRET: str = os.environ.get("ANVIL_STRAVA_CLIENT_SECRET", "")
+STRAVA_API_URL: str = os.environ.get("ANVIL_STRAVA_API_URL", "https://www.strava.com/api/v3")
+STRAVA_AUTH_URL: str = os.environ.get("ANVIL_STRAVA_AUTH_URL", "https://www.strava.com/oauth/authorize")
+STRAVA_TOKEN_URL: str = os.environ.get("ANVIL_STRAVA_TOKEN_URL", "https://www.strava.com/oauth/token")
+STRAVA_TIMEOUT: int = int(os.environ.get("ANVIL_STRAVA_TIMEOUT", "30"))
+# How far back the FIRST sync reaches (days). Later syncs are incremental. ≥90 days
+# recommended so the 42-day CTL EWMA has a meaningful warm-up.
+STRAVA_BACKFILL_DAYS: int = int(os.environ.get("ANVIL_STRAVA_BACKFILL_DAYS", "365"))
+# Also fetch per-activity streams (HR/watts/cadence time series) into the store.
+STRAVA_WITH_STREAMS: bool = _flag("ANVIL_STRAVA_WITH_STREAMS")
+
+# Local port for the one-time OAuth callbacks of BOTH services (no public URL
+# needed — Strava and Oura both allow localhost redirect URIs).
+FITNESS_OAUTH_PORT: int = int(os.environ.get("ANVIL_FITNESS_OAUTH_PORT", "8723"))
+
+# Vault layout: plans/analyses live under this vault-relative folder; the coaching
+# knowledge notes (zones, load management, periodization — ported from the MIT
+# claude-coach project) are seeded into <FITNESS_DIR>/<wissen> on first use.
+FITNESS_DIR: str = os.environ.get("ANVIL_FITNESS_DIR", "fitness")
+FITNESS_KNOWLEDGE_SUBDIR: str = os.environ.get("ANVIL_FITNESS_KNOWLEDGE_SUBDIR", "wissen")
+FITNESS_ANALYSIS_SUBDIR: str = os.environ.get("ANVIL_FITNESS_ANALYSIS_SUBDIR", "analysen")
+FITNESS_HUB_FILE: str = os.environ.get("ANVIL_FITNESS_HUB_FILE", "Fitness — Trainings-Hub.md")
+# SQLite store for raw Strava/Oura JSON + computed load metrics. Lives in STATE_DIR
+# (NOT the vault) so raw API data never shows up as notes. Empty => STATE_DIR/fitness.db.
+FITNESS_DB: str = os.environ.get("ANVIL_FITNESS_DB", "")
+
+# Your training goals, injected verbatim into the coach prompt (free text, e.g.
+# "Marathon unter 4h im Oktober; 2x Kraft pro Woche"). Empty = allgemeine Fitness.
+FITNESS_GOALS: str = os.environ.get("ANVIL_FITNESS_GOALS", "")
+# Optional physiology overrides for deterministic TSS (0 = unknown; then the
+# suffer-score proxy / Strava zones are used): lactate-threshold HR, FTP watts.
+FITNESS_LTHR: int = int(os.environ.get("ANVIL_FITNESS_LTHR", "0"))
+FITNESS_FTP: int = int(os.environ.get("ANVIL_FITNESS_FTP", "0"))
+
+# The plan agent: model (None => RESEARCH_MODEL => account default) + turn budget.
+FITNESS_MODEL: str | None = os.environ.get("ANVIL_FITNESS_MODEL") or None
+FITNESS_PLAN_MAX_TURNS: int = int(os.environ.get("ANVIL_FITNESS_PLAN_MAX_TURNS", "30"))
+FITNESS_ANALYZE_MAX_TURNS: int = int(os.environ.get("ANVIL_FITNESS_ANALYZE_MAX_TURNS", "25"))
+# Morning window: --daily generates the plan only from this hour on, and waits for
+# fresh Oura readiness (which appears after you open the Oura app) until the
+# fallback hour — from then on it plans with the last known state + a notice.
+FITNESS_PLAN_FROM_H: int = int(os.environ.get("ANVIL_FITNESS_PLAN_FROM_H", "5"))
+FITNESS_PLAN_FALLBACK_H: int = int(os.environ.get("ANVIL_FITNESS_PLAN_FALLBACK_H", "10"))
+# Post-workout analyses: when --daily finds newly synced activities, an analysis
+# agent writes one note per workout (capped per run) and pushes a one-liner.
+FITNESS_ANALYZE: bool = _flag("ANVIL_FITNESS_ANALYZE")
+FITNESS_ANALYZE_BATCH: int = int(os.environ.get("ANVIL_FITNESS_ANALYZE_BATCH", "3"))
+# Push the plan/analysis summary to a channel: "" => NOTIFY_CHANNEL; "off" disables.
+FITNESS_CHANNEL: str = os.environ.get("ANVIL_FITNESS_CHANNEL", "").strip().lower()
+# Cap on the pushed summary (transports truncate around ~1500 chars).
+FITNESS_SUMMARY_MAX_CHARS: int = int(os.environ.get("ANVIL_FITNESS_SUMMARY_MAX_CHARS", "1400"))
+
+
 # --- Telegram channel (anvil-telegram) -----------------------------------------
 # A Telegram bot is the easiest channel to run: talk to @BotFather to create a bot
 # and get its token, then message your bot (or add it to a group). Find your chat id
@@ -450,3 +631,16 @@ WEB_PORT: int = int(os.environ.get("ANVIL_WEB_PORT", "8765"))
 WEB_TOKEN: str = os.environ.get("ANVIL_WEB_TOKEN", "")
 # Name of the auth cookie set after a successful login.
 WEB_COOKIE: str = os.environ.get("ANVIL_WEB_COOKIE", "anvil_session")
+
+
+# --- anvil-jobs: geplante Prompts aus dem Chat (Port aus hermes-agent, MIT) ----
+# Der Chat-Agent darf einmalige/wiederkehrende Prompts planen ("erinnere mich
+# morgen 9:00 an X"). Der Tick läuft im anvil-tasks-Worker; die Zustellung geht
+# in den Ursprungs-Chat. Master-Schalter, default AUS.
+JOBS: bool = _flag("ANVIL_JOBS", "0")
+# Modell der Job-Läufe. None => MODEL (Chat-Parität).
+JOBS_MODEL: str | None = os.environ.get("ANVIL_JOBS_MODEL") or None
+# Turn-Deckel pro Job-Lauf (begrenzt, wie lange ein Job den Worker blockiert).
+JOBS_MAX_TURNS: int = int(os.environ.get("ANVIL_JOBS_MAX_TURNS", "15"))
+# Schutz vor LLM-Amok: harte Obergrenze angelegter Jobs.
+JOBS_MAX_JOBS: int = int(os.environ.get("ANVIL_JOBS_MAX_JOBS", "50"))

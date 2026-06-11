@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from . import config
+from . import config, events
 
 PENDING_FILE = "pending_actions.json"
 # Every confirmation request starts with this so the next poll skips its own
@@ -128,6 +128,7 @@ def send_proposal(chat: str, items: list[dict] | None = None) -> None:
     if not items:
         return
     text = format_proposal(items)[:3000]
+    events.publish("task", text, source="confirm")  # proposals show up in the HUD
     sender = _SENDERS.get(chat)
     if sender is not None:
         sender(chat, text)
@@ -194,9 +195,12 @@ def try_resolve(reply: str, chat: str | None = None) -> tuple[bool, str]:
     clear_pending()
 
     if not results:
+        events.publish("task", "Bestätigung: nichts ausgeführt.", source="confirm")
         return True, "Ok, nichts ausgeführt."
     kept = len(items) - len(results)
     summary = "\n".join(results)
     if kept:
         summary += f"\n({kept} verworfen.)"
+    # The executed (irreversible) actions are exactly what the HUD must show.
+    events.publish("task", summary, source="confirm")
     return True, summary

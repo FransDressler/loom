@@ -12,6 +12,12 @@ dependencies = [
     "uvicorn>=0.30",
 ]
 
+[project.optional-dependencies]
+# Local speech-to-text for the Feynman learning mode (anvil feynman): long German
+# explanations transcribe far better with Whisper than with the bundled
+# markitdown/Google-Web-Speech path, which remains the fallback.
+feynman = ["faster-whisper>=1.0"]
+
 [project.scripts]
 anvil = "anvil.cli:main"
 anvil-archive = "anvil.archive:main"
@@ -22,6 +28,8 @@ anvil-discord = "anvil.discord:main"
 anvil-cleaner = "anvil.cleaner:main"
 anvil-builder = "anvil.builder_inbox:main"
 anvil-ingest = "anvil.ingest:main"
+anvil-feynman = "anvil.feynman:main"
+anvil-fitness = "anvil.fitness:main"
 anvil-tasks = "anvil.tasks:main"
 anvil-mcp = "anvil.mcp_server:main"
 anvil-web = "anvil.web:main"

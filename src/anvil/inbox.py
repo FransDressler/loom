@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -69,7 +70,12 @@ def load_state(name: str) -> dict:
 def save_state(name: str, state: dict) -> None:
     path = state_path(name)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2))
+    # Atomic tmp+replace (pid-unique tmp, same pattern as context_hint/events): a
+    # crash mid-write or a concurrent writer must never leave a torn file behind —
+    # load_state would silently turn it into {}, losing cursor + seen-ids + history.
+    tmp = path.with_name(f"{path.stem}-{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(state, indent=2))
+    tmp.replace(path)
 
 
 # --- conversational chat history -----------------------------------------------
@@ -91,6 +97,10 @@ def save_chat_turns(channel: str, chat: str, turns: list[dict]) -> None:
     state = load_state(f"{channel}_history")
     state[chat] = turns[-config.CHAT_HISTORY_TURNS:]
     save_state(f"{channel}_history", state)
+    # Activity stamp for the nightly consolidate pass (lazy: consolidate imports us).
+    from .consolidate import mark_activity
+
+    mark_activity(channel, chat)
 
 
 def record_turn(turns: list[dict], role: str, text: str) -> None:

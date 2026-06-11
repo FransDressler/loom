@@ -101,6 +101,80 @@ Then drive the whole vault from chat — the server exposes these tools:
 Run `anvil-builder --watch` (or the systemd unit) alongside so the queue is worked
 down continuously.
 
+### Dynamisches Context-Management
+
+The vault is the long-term memory; every session is a disposable working window.
+Three independently-flagged pieces (all **off by default** — arm them in order,
+see `deploy/anvil.env.example`):
+
+1. **Memory surfaces** (`ANVIL_MEMORY_NOTES`): two budgeted vault notes —
+   *ANVIL — Profil & Präferenzen* and *ANVIL — Aktuelle Projekte* (~3000 chars,
+   `stand:` date) — are injected into **every** agent prompt, so a fresh session
+   starts warm. Hand-write them first; the consolidate pass maintains them later.
+2. **Per-turn context hint** (`ANVIL_CONTEXT_HINT`): `anvil context-hint`, a
+   deterministic UserPromptSubmit hook (no LLM, <1 s, fail-open, registered in the
+   vault's `.claude/settings.json`). It injects the last `retrieve` topic + age and
+   matching note titles as pointers — so the main agent notices a topic shift and
+   re-retrieves instead of reasoning on stale context. The conversation context is
+   append-only: growth happens via `retrieve` tool results, "rewriting" happens only
+   when Claude Code re-reads memory files from disk after compaction.
+3. **Sleep-time consolidation** (`ANVIL_CLEANER_CONSOLIDATE`): a pass in the daily
+   cleaner that distills active chats into episode notes (`conversations/<jahr>/`)
+   **before** turns fall out of the rolling 16-turn window, folds durable facts into
+   the memory surfaces, and updates `ops/checkpoints/`. Summarisation runs fine on a
+   cheaper model (`ANVIL_CONSOLIDATE_MODEL=claude-sonnet-4-6`); dry-run is on by
+   default (report to `ops/reports/` only). Optional retention
+   (`ANVIL_CHAT_RETENTION_DAYS`) moves distilled, idle chat windows into
+   `~/.local/state/anvil/trash/` — never a hard delete.
+
+A one-line `prompt_built` telemetry event (events feed) records the injected block
+sizes per prompt build, so the caps can be tuned on data instead of guesswork.
+
+### anvil doctor / status
+
+`anvil doctor` is the self-diagnosis for the whole flag-and-service zoo (structure
+adapted from [hermes-agent](https://github.com/NousResearch/hermes-agent), MIT):
+a declarative 23-row FEATURES table binds every feature group to its prerequisites,
+plus checks for channel connectivity (parallel probes, 8 s timeout, `--no-probes`
+to skip), systemd units/timers/linger, queue backlogs (builder-inbox, agent-tasks,
+ingest, confirm), and memory-surface budgets (instead of silent prompt truncation).
+`anvil status` is the quick read-only snapshot of the same table without probes;
+it is also exposed to Claude Code as the `anvil_status` MCP tool.
+
+- **Read-only by default.** `--fix` repairs only the non-destructive list: mkdir
+  for missing state/queue dirs, `chmod 600` on the env file, copying unit files
+  from `deploy/` + `daemon-reload`, and `recover_stranded`. It never deletes,
+  never disables, never touches user data. Exit code 1 if anything `fail`s.
+- **Secrets never appear** — config details only say "gesetzt/leer", and the whole
+  report passes through `redact_text` as a final choke point.
+- **Caveat:** the CLI does not load `~/.config/anvil/env` (only systemd does), so
+  channels may show "aus" although their services run. doctor detects this drift
+  and prints the hint; for the full view: `set -a; source ~/.config/anvil/env; set +a`.
+
+### Geplante Prompts (anvil-jobs)
+
+`ANVIL_JOBS=1` (off by default) lets the chat agent schedule one-shot or recurring
+prompts — "erinnere mich jeden Morgen um 7:30 an X" works from WhatsApp/Telegram/
+iMessage (deliberately **not** Discord, where third parties can post). Port of the
+standalone core of hermes-agent's cron (MIT), heavily slimmed:
+
+- **Schedule DSL, strict and tiny:** `once 2026-06-12 09:00` · `every 30m` (min 5 m)
+  · `daily 07:30` (local wall clock). Natural language → DSL is the LLM's job via
+  the `schedule_job` tool; the parser stays dumb. No croniter dependency.
+- **Storage:** one JSON file per job in `~/.local/state/anvil/jobs/`, mutations
+  under a global `flock`; `remove` moves to `jobs/.trash/` — never a hard delete.
+- **At-most-once:** the tick (start of every `anvil-tasks` worker cycle) advances
+  `next_run_at` under the lock **before** running — a crash costs at most one run,
+  never a duplicate. `once` jobs are deliberately at-least-once. Late recurring
+  jobs catch up within grace (= half the period, clamped 2 min–2 h), else fast-forward.
+- **Delivery** goes back to the originating chat (or `ANVIL_NOTIFY_CHANNEL` for CLI-
+  created jobs), chunked with the confirm prefix on every chunk (capture-loop guard).
+  A job replying exactly `[SILENT]` delivers nothing ("report only if news" jobs);
+  errors are **always** delivered, transport failures tracked as `delivery_error`.
+- `anvil jobs list|create|pause|resume|remove|run` for manual control. A long job
+  blocks one worker cycle (capped by `ANVIL_JOBS_MAX_TURNS`); known DST caveat:
+  `daily` slots can drift ±1 h twice a year (covered by grace).
+
 ## Other entry points
 
 **Messaging inboxes.** One shared listener engine (`anvil.listener`) runs the whole
@@ -167,6 +241,35 @@ file — subclass `Channel`, implement fetch/normalize/download/send. Each has
   queues (and `anvil queue <skill> [arg]` by hand) down off-thread, claim-by-move under
   `<vault>/agent-tasks/{todo,working,done}`. `--watch` polls every ~10s. Ship it as
   `deploy/anvil-tasks.service`.
+- `anvil-feynman` — **Feynman learning mode** (also `anvil feynman`). Record yourself
+  explaining a subject in your own words and drop the audio (mp3/m4a/ogg/…) into
+  `ANVIL_FEYNMAN_DIR` (default `~/anvil-feynman`); an examiner agent loads the
+  subject's whole vault cluster (Hub, concept + source notes), corrects your
+  explanation against it with [[note]] citations, names the biggest gap and asks
+  exactly ONE follow-up — which you answer with the next recording. Consecutive
+  recordings continue one session (SDK resume, surviving restarts; gap >
+  `ANVIL_FEYNMAN_SESSION_GAP_H` starts a new one). Each session becomes a chat-format
+  protocol under `<vault>/lernsessions/` with the original audio embedded; replies are
+  also pushed via `ANVIL_NOTIFY_CHANNEL`. The subject is a cluster folder (e.g. `AQC`),
+  picked per recording by a `aqc__name.mp3` prefix or `--subject`. Transcription runs
+  locally via faster-whisper (`uv sync --extra feynman`; falls back to the
+  markitdown/Google path otherwise). Ship it as `deploy/anvil-feynman.service`.
+- `anvil-fitness` — **daily training coach** from your wearables: syncs the **Oura
+  ring** (readiness, sleep, HRV) and **Strava** (every workout incl. detail +
+  HR/power streams) into a local SQLite store (`STATE_DIR/fitness.db`, never the
+  vault), computes TSS/CTL/ATL/TSB deterministically (42/7-day EWMA), and a coach
+  agent writes **today's plan** as a dated note under `<vault>/fitness/` plus a
+  short push to your chat — waiting in the morning until the Oura app has synced
+  (fallback at `ANVIL_FITNESS_PLAN_FALLBACK_H`). Newly finished workouts get an
+  **analysis note** (plan vs. actual). Coaching knowledge (zones, load management,
+  periodization, readiness traffic-light rules — ported from the MIT
+  [claude-coach](https://github.com/felixrieseberg/claude-coach)) is seeded into
+  `<vault>/fitness/wissen/` and drives the agent's reasoning; your goals go in
+  `ANVIL_FITNESS_GOALS`. From chat: "mach mir den Trainingsplan" queues the
+  `fitness-plan` skill. One-time setup: create the two OAuth apps (see
+  `deploy/anvil.env.example`), then `anvil-fitness --auth strava` /`--auth oura`.
+  Ship it as `deploy/anvil-fitness.timer` (every 30 min, 05:00–22:30); raw API
+  tokens stay in `STATE_DIR`, rotated refresh tokens are persisted atomically.
 - `anvil-web` — small token-gated chat front-end over the same agent.
 - `anvil-cleaner` — daily non-destructive gardening pass.
 - `anvil-builder` — builder-inbox worker; `--watch` polls the complaint queue (~10s)

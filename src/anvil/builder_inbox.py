@@ -26,7 +26,7 @@ from pathlib import Path
 
 from claude_agent_sdk import ClaudeAgentOptions, create_sdk_mcp_server, query, tool
 
-from . import config
+from . import config, events
 from .prompt import build_builder_prompt
 
 TODO, WORKING, DONE = "todo", "working", "done"
@@ -214,11 +214,15 @@ async def _run_builder_agent(complaint_rel: str, complaint_text: str, options: C
     parts: list[str] = []
     from claude_agent_sdk import AssistantMessage, TextBlock
 
-    async for msg in query(prompt=prompt, options=options):
-        if isinstance(msg, AssistantMessage):
-            for block in msg.content:
-                if isinstance(block, TextBlock) and block.text.strip():
-                    parts.append(block.text.strip())
+    from .agent import _publish
+
+    with events.scope("builder"):
+        async for msg in query(prompt=prompt, options=options):
+            _publish(msg)
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock) and block.text.strip():
+                        parts.append(block.text.strip())
     return "\n".join(parts).strip()
 
 

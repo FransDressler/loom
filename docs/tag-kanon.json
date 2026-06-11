@@ -1,0 +1,1053 @@
+{
+ "mapping": [
+  {
+   "from": "AIS",
+   "to": "ais"
+  },
+  {
+   "from": "ANC-Kopfhörer",
+   "to": "anc-kopfhörer"
+  },
+  {
+   "from": "ART",
+   "to": "art"
+  },
+  {
+   "from": "Arrhenius",
+   "to": "arrhenius"
+  },
+  {
+   "from": "Ashby-Diagramm",
+   "to": "ashby-diagramm"
+  },
+  {
+   "from": "COVID-19",
+   "to": "covid-19"
+  },
+  {
+   "from": "Cortisol",
+   "to": "cortisol"
+  },
+  {
+   "from": "Diffusion",
+   "to": "diffusion"
+  },
+  {
+   "from": "EEG",
+   "to": "eeg"
+  },
+  {
+   "from": "ERP",
+   "to": "erp"
+  },
+  {
+   "from": "FTP",
+   "to": "ftp"
+  },
+  {
+   "from": "Ficksches-Gesetz",
+   "to": "ficksches-gesetz"
+  },
+  {
+   "from": "HIIT",
+   "to": "hiit"
+  },
+  {
+   "from": "HPA-Achse",
+   "to": "hpa-achse"
+  },
+  {
+   "from": "HRV",
+   "to": "hrv"
+  },
+  {
+   "from": "KI",
+   "to": "ki"
+  },
+  {
+   "from": "Kontrollfragen",
+   "to": "kontrollfragen"
+  },
+  {
+   "from": "Laengsschnittstudie",
+   "to": "längsschnittstudie"
+  },
+  {
+   "from": "Materialklassen",
+   "to": "materialklasse"
+  },
+  {
+   "from": "Mechanische Eigenschaften",
+   "to": "mechanische-eigenschaften"
+  },
+  {
+   "from": "NREM",
+   "to": "nrem"
+  },
+  {
+   "from": "P300",
+   "to": "p300"
+  },
+  {
+   "from": "PSSE",
+   "to": "psse"
+  },
+  {
+   "from": "Plastizität",
+   "to": "plastizität"
+  },
+  {
+   "from": "RCT",
+   "to": "rct"
+  },
+  {
+   "from": "REM",
+   "to": "rem"
+  },
+  {
+   "from": "SCN",
+   "to": "scn"
+  },
+  {
+   "from": "SEAS",
+   "to": "seas"
+  },
+  {
+   "from": "SEM",
+   "to": "sem"
+  },
+  {
+   "from": "SOSORT",
+   "to": "sosort"
+  },
+  {
+   "from": "STEM",
+   "to": "stem"
+  },
+  {
+   "from": "Schlaf",
+   "to": "schlaf"
+  },
+  {
+   "from": "Studenten",
+   "to": "studierende"
+  },
+  {
+   "from": "TUM",
+   "to": "tum"
+  },
+  {
+   "from": "VO2max",
+   "to": "vo2max"
+  },
+  {
+   "from": "VT1",
+   "to": "vt1"
+  },
+  {
+   "from": "Versetzungen",
+   "to": "versetzungen"
+  },
+  {
+   "from": "Werkstoffkunde",
+   "to": "materialwissenschaft"
+  },
+  {
+   "from": "Wohlbefinden",
+   "to": "wohlbefinden"
+  },
+  {
+   "from": "abrufstaerke",
+   "to": "abrufstärke"
+  },
+  {
+   "from": "aerobe-kapazitaet",
+   "to": "aerobe-kapazität"
+  },
+  {
+   "from": "ai",
+   "to": "ki"
+  },
+  {
+   "from": "ai-agents",
+   "to": "ki-agenten"
+  },
+  {
+   "from": "ai-stack",
+   "to": "ki-infrastruktur"
+  },
+  {
+   "from": "anti-aging",
+   "to": "longevity"
+  },
+  {
+   "from": "arbeitsgedaechtnis",
+   "to": "arbeitsgedächtnis"
+  },
+  {
+   "from": "attention",
+   "to": "aufmerksamkeit"
+  },
+  {
+   "from": "automation",
+   "to": "automatisierung"
+  },
+  {
+   "from": "becken-obliquitaet",
+   "to": "becken-obliquität"
+  },
+  {
+   "from": "beinlaengendifferenz",
+   "to": "beinlängendifferenz"
+  },
+  {
+   "from": "bell-ungleichungen",
+   "to": "bell-ungleichung"
+  },
+  {
+   "from": "bikefit",
+   "to": "bike-fit"
+  },
+  {
+   "from": "bosonische-codes",
+   "to": "bosonic-code"
+  },
+  {
+   "from": "bueroakustik",
+   "to": "büroakustik"
+  },
+  {
+   "from": "cbti",
+   "to": "cbt-i"
+  },
+  {
+   "from": "chips",
+   "to": "halbleiter"
+  },
+  {
+   "from": "circadian",
+   "to": "zirkadianrhythmus"
+  },
+  {
+   "from": "circadian-rhythmus",
+   "to": "zirkadianrhythmus"
+  },
+  {
+   "from": "circadiane-rhythmen",
+   "to": "zirkadianrhythmus"
+  },
+  {
+   "from": "circadiane-rhythmik",
+   "to": "zirkadianrhythmus"
+  },
+  {
+   "from": "circadianer-rhythmus",
+   "to": "zirkadianrhythmus"
+  },
+  {
+   "from": "climatetech",
+   "to": "climate-tech"
+  },
+  {
+   "from": "dach",
+   "to": "deutschland"
+  },
+  {
+   "from": "decoherence",
+   "to": "dekohärenz"
+  },
+  {
+   "from": "deep-tech",
+   "to": "deeptech"
+  },
+  {
+   "from": "defence",
+   "to": "defense"
+  },
+  {
+   "from": "deklaratives-gedaechtnis",
+   "to": "deklaratives-gedächtnis"
+  },
+  {
+   "from": "dekohaerenz",
+   "to": "dekohärenz"
+  },
+  {
+   "from": "demenzpraevention",
+   "to": "demenzprävention"
+  },
+  {
+   "from": "emerging-tech",
+   "to": "trends"
+  },
+  {
+   "from": "energieverfuegbarkeit",
+   "to": "energieverfügbarkeit"
+  },
+  {
+   "from": "erdwaerme",
+   "to": "erdwärme"
+  },
+  {
+   "from": "ermuedung",
+   "to": "ermüdung"
+  },
+  {
+   "from": "ernaehrung",
+   "to": "ernährung"
+  },
+  {
+   "from": "ernaehrung-timing",
+   "to": "ernährung-timing"
+  },
+  {
+   "from": "eu",
+   "to": "europa"
+  },
+  {
+   "from": "expparams",
+   "to": "exp-params"
+  },
+  {
+   "from": "fernwaerme",
+   "to": "fernwärme"
+  },
+  {
+   "from": "festkoerperphysik",
+   "to": "festkörperphysik"
+  },
+  {
+   "from": "foam-rolling",
+   "to": "faszienrollierung"
+  },
+  {
+   "from": "focus",
+   "to": "fokus"
+  },
+  {
+   "from": "fossile-energietraeger",
+   "to": "fossile-energieträger"
+  },
+  {
+   "from": "gedaechniskonsolidierung",
+   "to": "gedächtniskonsolidierung"
+  },
+  {
+   "from": "gedaechtnis",
+   "to": "gedächtnis"
+  },
+  {
+   "from": "gedaechtniskonsolidierung",
+   "to": "gedächtniskonsolidierung"
+  },
+  {
+   "from": "gekruemmte-raumzeit",
+   "to": "gekrümmte-raumzeit"
+  },
+  {
+   "from": "glykaemischer-index",
+   "to": "glykämischer-index"
+  },
+  {
+   "from": "gruendungen",
+   "to": "startup"
+  },
+  {
+   "from": "healthtech",
+   "to": "digital-health"
+  },
+  {
+   "from": "humanoide",
+   "to": "humanoide-roboter"
+  },
+  {
+   "from": "infrastruktur",
+   "to": "ki-infrastruktur"
+  },
+  {
+   "from": "intensitaet",
+   "to": "intensität"
+  },
+  {
+   "from": "intensitaetsverteilung",
+   "to": "intensitätsverteilung"
+  },
+  {
+   "from": "interpretationen",
+   "to": "interpretation"
+  },
+  {
+   "from": "interpretationen-der-qm",
+   "to": "interpretation-qm"
+  },
+  {
+   "from": "interpretationen-der-quantenmechanik",
+   "to": "interpretation-qm"
+  },
+  {
+   "from": "interpretationen-qm",
+   "to": "interpretation-qm"
+  },
+  {
+   "from": "ipRGC",
+   "to": "iprgc"
+  },
+  {
+   "from": "kausalitaet",
+   "to": "kausalität"
+  },
+  {
+   "from": "kernenergie",
+   "to": "nuklear"
+  },
+  {
+   "from": "kernreaktoren",
+   "to": "kernreaktor"
+  },
+  {
+   "from": "ki-rechenzentren",
+   "to": "rechenzentren"
+  },
+  {
+   "from": "klassikalitaet",
+   "to": "klassikalität"
+  },
+  {
+   "from": "kohaerenz",
+   "to": "kohärenz"
+  },
+  {
+   "from": "kollektoren",
+   "to": "kollektor"
+  },
+  {
+   "from": "komplementaritaet",
+   "to": "komplementarität"
+  },
+  {
+   "from": "komplexitaetsseparation",
+   "to": "komplexitätsseparation"
+  },
+  {
+   "from": "kontextualitaet",
+   "to": "kontextualität"
+  },
+  {
+   "from": "kontextuelle-objektivitaet",
+   "to": "kontextuelle-objektivität"
+  },
+  {
+   "from": "konzeptuelles-verständnis",
+   "to": "konzeptuelles-verstehen"
+  },
+  {
+   "from": "kraeuter",
+   "to": "kräuter"
+  },
+  {
+   "from": "laengsschnitt",
+   "to": "längsschnitt"
+  },
+  {
+   "from": "laerm",
+   "to": "lärm"
+  },
+  {
+   "from": "lagerlogistik",
+   "to": "logistik"
+  },
+  {
+   "from": "lebensqualitaet",
+   "to": "lebensqualität"
+  },
+  {
+   "from": "legierungen",
+   "to": "legierung"
+  },
+  {
+   "from": "lieferkette",
+   "to": "logistik"
+  },
+  {
+   "from": "many-worlds",
+   "to": "viele-welten"
+  },
+  {
+   "from": "markt",
+   "to": "marktanalyse"
+  },
+  {
+   "from": "marktbericht",
+   "to": "marktreport"
+  },
+  {
+   "from": "marktdaten",
+   "to": "marktanalyse"
+  },
+  {
+   "from": "marktkarte",
+   "to": "marktanalyse"
+  },
+  {
+   "from": "materialklassen",
+   "to": "materialklasse"
+  },
+  {
+   "from": "materialwissenschaften",
+   "to": "materialwissenschaft"
+  },
+  {
+   "from": "mikronaehrstoffe",
+   "to": "mikronährstoffe"
+  },
+  {
+   "from": "mindfulness",
+   "to": "achtsamkeit"
+  },
+  {
+   "from": "moc-ergaenzung",
+   "to": "moc-ergänzung"
+  },
+  {
+   "from": "mtor-ampk",
+   "to": "ampk-mtor"
+  },
+  {
+   "from": "neuromuskulaer",
+   "to": "neuromuskulär"
+  },
+  {
+   "from": "neuroplastizitaet",
+   "to": "neuroplastizität"
+  },
+  {
+   "from": "neurotech",
+   "to": "bci"
+  },
+  {
+   "from": "neutralatome",
+   "to": "neutral-atoms"
+  },
+  {
+   "from": "neutrale-atome",
+   "to": "neutral-atoms"
+  },
+  {
+   "from": "nichtlokalitaet",
+   "to": "nichtlokalität"
+  },
+  {
+   "from": "no-go-theoreme",
+   "to": "no-go-theorem"
+  },
+  {
+   "from": "non-markovianitaet",
+   "to": "non-markovianität"
+  },
+  {
+   "from": "omega3",
+   "to": "omega-3"
+  },
+  {
+   "from": "paediatrie",
+   "to": "pädiatrie"
+  },
+  {
+   "from": "pgc1alpha",
+   "to": "pgc-1alpha"
+  },
+  {
+   "from": "phaenomenologie",
+   "to": "phänomenologie"
+  },
+  {
+   "from": "phasenschaetzung",
+   "to": "phasenschätzung"
+  },
+  {
+   "from": "physical-therapy",
+   "to": "physiotherapie"
+  },
+  {
+   "from": "plastizitaet",
+   "to": "plastizität"
+  },
+  {
+   "from": "polarisiert",
+   "to": "polarisiertes-training"
+  },
+  {
+   "from": "polarized-training",
+   "to": "polarisiertes-training"
+  },
+  {
+   "from": "praediktor",
+   "to": "prädiktor"
+  },
+  {
+   "from": "praezisionsphysik",
+   "to": "präzisionsphysik"
+  },
+  {
+   "from": "primaerversorgung",
+   "to": "primärversorgung"
+  },
+  {
+   "from": "produktivitaet",
+   "to": "produktivität"
+  },
+  {
+   "from": "prozedurales-gedaechtnis",
+   "to": "prozedurales-gedächtnis"
+  },
+  {
+   "from": "pruefungsstress",
+   "to": "prüfungsstress"
+  },
+  {
+   "from": "quanten-algorithmen",
+   "to": "quantenalgorithmen"
+  },
+  {
+   "from": "quanten-fehlerkorrektur",
+   "to": "quantenfehlerkorrektur"
+  },
+  {
+   "from": "quanten-klassisch-uebergang",
+   "to": "quanten-klassisch-übergang"
+  },
+  {
+   "from": "quantenalgorithmus",
+   "to": "quantenalgorithmen"
+  },
+  {
+   "from": "quanteninterpretation",
+   "to": "interpretation-qm"
+  },
+  {
+   "from": "quantenphasenuebergang",
+   "to": "quantenphasenübergang"
+  },
+  {
+   "from": "qubits",
+   "to": "qubit"
+  },
+  {
+   "from": "radioaktivitaet",
+   "to": "radioaktivität"
+  },
+  {
+   "from": "rankine",
+   "to": "rankine-zyklus"
+  },
+  {
+   "from": "relational-qm",
+   "to": "relationale-qm"
+  },
+  {
+   "from": "relationale-quantenmechanik",
+   "to": "relationale-qm"
+  },
+  {
+   "from": "relativitaet",
+   "to": "relativität"
+  },
+  {
+   "from": "retrokausaelitaet",
+   "to": "retrokausalität"
+  },
+  {
+   "from": "retrokausalitaet",
+   "to": "retrokausalität"
+  },
+  {
+   "from": "rueckenschmerz",
+   "to": "rückenschmerz"
+  },
+  {
+   "from": "rumpfstabilitaet",
+   "to": "rumpfstabilität"
+  },
+  {
+   "from": "schlafqualitaet",
+   "to": "schlafqualität"
+  },
+  {
+   "from": "schlafregularitaet",
+   "to": "schlafregularität"
+  },
+  {
+   "from": "sleep",
+   "to": "schlaf"
+  },
+  {
+   "from": "social-jetlag",
+   "to": "sozialer-jetlag"
+  },
+  {
+   "from": "soziales-jetlag",
+   "to": "sozialer-jetlag"
+  },
+  {
+   "from": "speicherstaerke",
+   "to": "speicherstärke"
+  },
+  {
+   "from": "sport-ernaehrung-kognition",
+   "to": "sport-ernährung-kognition"
+  },
+  {
+   "from": "stabilitaetstraining",
+   "to": "stabilitätstraining"
+  },
+  {
+   "from": "startup-nische",
+   "to": "startup-nischen"
+  },
+  {
+   "from": "startups",
+   "to": "startup"
+  },
+  {
+   "from": "studenten",
+   "to": "studierende"
+  },
+  {
+   "from": "supplementation",
+   "to": "supplementierung"
+  },
+  {
+   "from": "supplemente",
+   "to": "supplement"
+  },
+  {
+   "from": "supplements",
+   "to": "supplement"
+  },
+  {
+   "from": "supraleitend-geschuetzt",
+   "to": "supraleitend-geschützt"
+  },
+  {
+   "from": "symmetriegruppen",
+   "to": "symmetriegruppe"
+  },
+  {
+   "from": "systematischer-review",
+   "to": "systematic-review"
+  },
+  {
+   "from": "systematisches-review",
+   "to": "systematic-review"
+  },
+  {
+   "from": "technologietrends",
+   "to": "trends"
+  },
+  {
+   "from": "trainingsernaehrung",
+   "to": "trainingsernährung"
+  },
+  {
+   "from": "trend",
+   "to": "trends"
+  },
+  {
+   "from": "trend-framework",
+   "to": "trends"
+  },
+  {
+   "from": "trend-report",
+   "to": "trends"
+  },
+  {
+   "from": "trendreport",
+   "to": "trends"
+  },
+  {
+   "from": "troepfchenmodell",
+   "to": "tröpfchenmodell"
+  },
+  {
+   "from": "uebung",
+   "to": "übung"
+  },
+  {
+   "from": "uebungssicherheit",
+   "to": "übungssicherheit"
+  },
+  {
+   "from": "unitaritaet",
+   "to": "unitarität"
+  },
+  {
+   "from": "universitaet",
+   "to": "universität"
+  },
+  {
+   "from": "variabilitaet",
+   "to": "variabilität"
+  },
+  {
+   "from": "venturecapital",
+   "to": "venture-capital"
+  },
+  {
+   "from": "verschraenkung",
+   "to": "verschränkung"
+  },
+  {
+   "from": "vitaminD",
+   "to": "vitamin-d"
+  },
+  {
+   "from": "warehouse-automation",
+   "to": "automatisierung"
+  },
+  {
+   "from": "werkstoffkunde",
+   "to": "materialwissenschaft"
+  },
+  {
+   "from": "wirbelsaeule",
+   "to": "wirbelsäule"
+  },
+  {
+   "from": "wirbelsaeulenbiomechanik",
+   "to": "wirbelsäulenbiomechanik"
+  },
+  {
+   "from": "zahlungsverkehr",
+   "to": "payments"
+  },
+  {
+   "from": "zeitverschraenkung",
+   "to": "zeitverschränkung"
+  },
+  {
+   "from": "zirkadian",
+   "to": "zirkadianrhythmus"
+  },
+  {
+   "from": "zirkadiane-rhythmen",
+   "to": "zirkadianrhythmus"
+  },
+  {
+   "from": "zirkadiane-rhythmik",
+   "to": "zirkadianrhythmus"
+  },
+  {
+   "from": "zirkadianer-rhythmus",
+   "to": "zirkadianrhythmus"
+  },
+  {
+   "from": "zone-2",
+   "to": "zone2"
+  }
+ ],
+ "vocabulary": [
+  "auto",
+  "conversation",
+  "konzept",
+  "quantencomputing",
+  "source",
+  "paper",
+  "qc",
+  "energiewissenschaften",
+  "schlaf",
+  "quantenmechanik",
+  "skoliose",
+  "tum",
+  "cycling",
+  "schlafhygiene",
+  "tagesroutine",
+  "thermodynamik",
+  "vorlesung",
+  "interpretation",
+  "kognition",
+  "deep-work",
+  "aqc",
+  "periodisierung",
+  "review",
+  "abendroutine",
+  "krafttraining",
+  "energie",
+  "wmi",
+  "dekohärenz",
+  "startup",
+  "lernen",
+  "ernährung",
+  "exergie",
+  "fokus",
+  "chronobiologie",
+  "startup-nischen",
+  "studierende",
+  "ki",
+  "ausdauer",
+  "messproblem",
+  "recovery",
+  "systematic-review",
+  "zirkadianrhythmus",
+  "ftp",
+  "meta-analyse",
+  "moc",
+  "wärmepumpe",
+  "ais",
+  "entspannung",
+  "software",
+  "übungsblatt",
+  "halbleiter",
+  "quantenfehlerkorrektur",
+  "grundlagen",
+  "materialwissenschaft",
+  "quanten-hardware",
+  "schroth",
+  "chronotyp",
+  "fehlertoleranz",
+  "melatonin",
+  "physiotherapie",
+  "qft",
+  "radsport",
+  "treibhauseffekt",
+  "vo2max",
+  "offene-quantensysteme",
+  "quantengravitation",
+  "rankine-zyklus",
+  "rct",
+  "solarthermie",
+  "cobb-winkel",
+  "psse",
+  "quantensimulation",
+  "biomechanik",
+  "bosonic-code",
+  "eingang",
+  "gedächtnis",
+  "photovoltaik",
+  "concurrent-training",
+  "energiemanagement",
+  "ionenfalle",
+  "quantenalgorithmen",
+  "topological",
+  "bike-fit",
+  "evidenz",
+  "ki-infrastruktur",
+  "photonic",
+  "quantenfeldtheorie",
+  "spaced-repetition",
+  "sport",
+  "standardmodell",
+  "stress",
+  "zone2",
+  "achtsamkeit",
+  "dampfkraftwerk",
+  "ising-maschine",
+  "ki-agenten",
+  "marktreport",
+  "mbqc",
+  "nisq",
+  "no-go-theorem",
+  "erdwärme",
+  "fehlerkorrektur",
+  "gesundheit",
+  "modular-emerging",
+  "primärenergie",
+  "produktivität",
+  "relationale-qm",
+  "sosort",
+  "supraleitend-geschützt",
+  "trends",
+  "verschränkung",
+  "active-recall",
+  "asymmetrie",
+  "blaulicht",
+  "carnot",
+  "effektives-lernen",
+  "kernfusion",
+  "lerntechniken",
+  "nuklear",
+  "qec-codes",
+  "quelle",
+  "renormierung",
+  "supraleitende-qubits",
+  "venture-capital",
+  "cbt-i",
+  "endenergie",
+  "erholung",
+  "erneuerbare-energien",
+  "geothermie",
+  "hrv",
+  "insomnie",
+  "nachhaltigkeit",
+  "qbism",
+  "seas",
+  "sonne",
+  "training",
+  "trainingssteuerung",
+  "viele-welten",
+  "beinlängendifferenz",
+  "bell-ungleichung",
+  "foundations",
+  "gewohnheiten",
+  "hiit",
+  "journaling",
+  "kernspaltung",
+  "vertical-ai",
+  "zeitverschränkung",
+  "ausdauertraining",
+  "deeptech",
+  "fossile-energieträger",
+  "gedächtniskonsolidierung",
+  "hardware",
+  "kernphysik",
+  "kora",
+  "neutral-atoms",
+  "nichtlokalität",
+  "retrieval-practice",
+  "services-as-software",
+  "supplementierung",
+  "vortrag",
+  "zeitmanagement",
+  "angst",
+  "anvil",
+  "aufmerksamkeit",
+  "deliberate-practice",
+  "effektive-feldtheorie",
+  "immobilien",
+  "intensitätsverteilung",
+  "interferenzeffekt",
+  "interpretation-qm",
+  "leistungsdiagnostik",
+  "nicht-perturbativ",
+  "physik-lernen",
+  "retrokausalität",
+  "solarzelle",
+  "wmiqc",
+  "ablenkungsfreiheit",
+  "adenosin",
+  "akademische-leistung",
+  "automatisierung",
+  "autonomes-nervensystem",
+  "born-regel",
+  "emg",
+  "interleaving",
+  "kognitionswissenschaft",
+  "kognitive-leistung",
+  "konzeptuelles-verstehen",
+  "laboneq",
+  "meditation",
+  "motivation",
+  "neurowissenschaft",
+  "plasma",
+  "quantenchemie",
+  "quanteninformation",
+  "radioaktivität",
+  "regulierung",
+  "schlafarchitektur",
+  "schlafqualität",
+  "setup",
+  "strahlung",
+  "wiki"
+ ],
+ "stats": "VORHER: 2054 md-Dateien gescannt (exkl. .obsidian/.trash/venv); 1487 mit Frontmatter-tags; 8058 Tag-Vorkommen; 1629 distinct Tags. NACHHER (Mapping angewandt): 211 Mapping-Einträge (from!=to); distinct Tags 1629 -> 1478 (-151); 386 Notizen betroffen. ZIELVOKABULAR: 190 kanonische Tags (alle freq>=8), deckt 5412/8058 ~= 67% aller Tag-Vorkommen ab. Long-Tail (~1288 Tags, meist Einmal-Tags, freq<8) bleibt unangetastet und wird später vom Lint gemeldet, nicht hier gelöscht. Reduktion stammt aus: ~74 Casing/Umlaut/Space-Kollisionen (auto), ~42 explizite ASCII->Umlaut-Translit (nur eindeutig deutsche Wörter), ~55 Glossar-Varianten + Synonyme, Rest Plural->Singular & Schreibvarianten.",
+ "notes": "STRIKT READ-ONLY ausgeführt — keine Schreibzugriffe im Vault. Hilfsskripte unter /tmp (extract_tags.py, build_mapping.py, final_mapping.py, vocab2.py); Häufigkeitsliste /tmp/tag_freq.txt, Mapping /tmp/mapping.json, Vokabular /tmp/vocab.json.\n\nMETHODIK (3-Schicht, konservativ):\n1) Auto-Fold: lowercase + Space->Hyphen + Umlaut-Faltung (ä<->ae, ö<->oe, ü<->ue). Zwei Oberflächenformen werden NUR zusammengeführt, wenn sie nach Faltung identisch sind; Kanon ist immer die Umlautform (z.B. dekohaerenz+dekohärenz -> dekohärenz, Produktivitaet+produktivität -> produktivität). Das ist verlustfrei sicher.\n2) Explizite ASCII->Umlaut-Liste: für ASCII-Tags OHNE Umlaut-Zwilling habe ich jedes einzeln geprüft und nur echte deutsche Umlautwörter umgesetzt (kausalitaet->kausalität, festkoerperphysik->festkörperphysik, rueckenschmerz->rückenschmerz ...). WICHTIG: KEINE Blind-Transliteration — bewusst NICHT angefasst wurden Wörter, in denen ae/oe/ue/ss kein Umlaut/ß ist: ausdauer, quelle, erneuerbare, steuerung, herzfrequenz, sequenz, neuro-, auto-elongation, sowie englische Tags (fueling, build, business, cross/access, mindfulness etc.). ss/ß wurde konservativ NICHT umgewandelt (z.B. weisses-rauschen blieb), da die Entscheidung nur Umlaute nennt und ss meist legitim ist (Messproblem, energiewissenschaften).\n3) Glossar als Wahrheit: kanonische Tags + 'Varianten' aus \"ANVIL — Glossar & Synonyme.md\" angewandt (ai->ki, quantum-computing->quantencomputing, chips->halbleiter, kernenergie->nuklear, healthtech->digital-health, dach->deutschland, werkstoffkunde->materialwissenschaft, zi->zurich-instruments ...). 'verwandt'-Beziehungen wurden bewusst NICHT gemergt (z.B. gpu/tpu bleiben getrennt von compute; nachhaltigkeit getrennt von climate-tech; smr/fusion getrennt von nuklear), da related != gleich.\n4) Zusätzlich wenige hochsichere Plural->Singular (qubits->qubit, no-go-theoreme->no-go-theorem) und EN/DE-Synonyme (sleep->schlaf, focus->fokus, decoherence->dekohärenz, many-worlds->viele-welten, systematischer-review->systematic-review, studenten->studierende).\n\nENTSCHEIDUNGEN/CAVEATS:\n- 'interpretation' (allgemein) bewusst NICHT in 'interpretation-qm' gemergt; nur explizit QM-benannte Compound-Formen (interpretationen-der-quantenmechanik, quanteninterpretation ...) -> interpretation-qm.\n- Circadian-Cluster auf häufigsten Kanon 'zirkadianrhythmus' vereinheitlicht; 'zirkadiane-uhr', 'schlaf-wach-rhythmus', 'chronotyp', 'chronobiologie' bewusst getrennt belassen (eigene Konzepte).\n- Strukturelle Pipeline-Tags (auto, conversation, source, paper, eingang, qc, review, wiki, digest) sind sehr häufig und im Vokabular belassen — bei Bedarf später als eigene Klasse \"Status/Quelle\" behandeln.\n- 'fehlerkorrektur' vs 'quantenfehlerkorrektur' getrennt gelassen (Granularität), ebenso supraleitung/supraleiter/supraleitende-qubits.\n- Einige Plurale ohne existierenden Singular wurden zu neu erzeugtem Singular normalisiert (legierungen->legierung, kollektoren->kollektor, kernreaktoren->kernreaktor); rein kosmetisch, niedrige Frequenz.\n\nOFFEN FÜR REVIEW: ~1290 Long-Tail-/Einmal-Tags (v.a. Skoliose-, Schlaf-, QC-Physik-Detailtags) sind NICHT gemappt — bewusst konservativ. Sie sollten vom Lint gegen dieses 190er-Vokabular gemeldet und in einer zweiten, themenspezifischen Runde unter breitere Kanons gefasst werden."
+}

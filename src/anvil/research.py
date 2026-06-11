@@ -15,6 +15,7 @@ so and the agent continues text-only.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import mimetypes
 import os
@@ -286,6 +287,44 @@ async def _capture_with_retry(prompt: str, options, label: str, retries: int = 1
             raise
 
 
+def _scoped_folder(folder: str, vault: str) -> str:
+    """Place a cluster folder under RESEARCH_BASE_DIR (e.g. `wissen/`).
+
+    Explicit paths (containing "/") and folders that already exist at the vault
+    root (pre-migration clusters) are respected as-is, so nothing moves silently.
+    """
+    folder = (folder or "").strip("/")
+    base = (config.RESEARCH_BASE_DIR or "").strip("/")
+    if not base or not folder:
+        return folder
+    if folder == base or folder.startswith(f"{base}/") or "/" in folder:
+        return folder
+    if (Path(vault) / folder).exists():
+        return folder
+    return f"{base}/{folder}"
+
+
+def _resolve_hub_name(folder: str, vault: str, fallback: str) -> str:
+    """The cluster's actual Hub (MOC) note name on disk, or `fallback`.
+
+    Re-research and Feynman sessions hit folders whose hub already exists; reuse
+    that note's exact name (casing differs from the planner's slug) instead of
+    minting a second MOC beside it.
+    """
+    d = Path(vault) / folder
+    if d.is_dir():
+        want = fallback.strip().casefold()
+        mocs: list[str] = []
+        for p in sorted(d.glob("*.md")):
+            if p.stem.casefold() == want:
+                return p.stem
+            if p.stem.endswith((" — MOC", " — Map of Content")):
+                mocs.append(p.stem)
+        if len(mocs) == 1:
+            return mocs[0]
+    return fallback
+
+
 def _store_raw_source(folder: str, slug: str, src: dict, vault: str) -> str | None:
     """Fetch a source's full Markdown and store it as raw/<slug>.quelle.md.
 
@@ -305,6 +344,8 @@ def _store_raw_source(folder: str, slug: str, src: dict, vault: str) -> str | No
             if not mathpix.is_configured():
                 return None
             data = figures.fetch(url)
+            # PDF sources fingerprint the fetched ORIGINAL bytes (stable across OCR runs).
+            digest = hashlib.sha256(data).hexdigest()
             doc_name = os.path.basename(url) or "document.pdf"
             if config.DESCRIBE_IMAGES:
                 # `md.zip` so Mathpix also returns the document's cropped figures.
@@ -323,6 +364,9 @@ def _store_raw_source(folder: str, slug: str, src: dict, vault: str) -> str | No
                 original = ""
         else:
             md = mdconvert.convert_url(url)
+            # Web sources have no stable original bytes: fingerprint the converted
+            # Markdown (before figure enrichment, which depends on a captioning model).
+            digest = hashlib.sha256((md or "").encode("utf-8", "replace")).hexdigest()
     except Exception as exc:  # noqa: BLE001 — best-effort; agent fetches as fallback
         _log(f"[deep]   (rohe md für {slug} nicht geholt: {exc})")
         return None
@@ -350,6 +394,7 @@ def _store_raw_source(folder: str, slug: str, src: dict, vault: str) -> str | No
     raw_dir.mkdir(parents=True, exist_ok=True)
     name = f"{slug}.quelle"
     front = f"---\nsource_url: {url}\nfetched: {date.today().isoformat()}\n"
+    front += f"source_hash: {digest}\n"
     if original:
         front += f"original: {config.RESEARCH_ASSET_DIR}/{original}\n"
     front += "---\n\n"
@@ -424,6 +469,9 @@ def _store_raw_local(folder: str, slug: str, path: str, vault: str) -> str | Non
     raw_dir.mkdir(parents=True, exist_ok=True)
     # `source_file` (not source_url) marks this as a locally-ingested source.
     front = f"---\nsource_file: {name}\nfetched: {date.today().isoformat()}\n"
+    # The fingerprint is of the ORIGINAL file bytes, not the converted Markdown,
+    # so re-dropping the same document is recognized regardless of OCR drift.
+    front += f"source_hash: {hashlib.sha256(data).hexdigest()}\n"
     if original:
         front += f"original: {config.RESEARCH_ASSET_DIR}/{original}\n"
     front += "---\n\n"
@@ -433,6 +481,31 @@ def _store_raw_local(folder: str, slug: str, path: str, vault: str) -> str | Non
         _log(f"[ingest]   (Roh-Notiz für {slug} nicht geschrieben: {exc})")
         return None
     return original or name
+
+
+def _find_by_source_hash(folder: str, vault: str, digest: str) -> str | None:
+    """Vault-relative path of an existing source with this content fingerprint.
+
+    Lets ingest recognize a re-dropped document instead of building a duplicate
+    cluster entry. Prefers the synthesized source NOTE (raw/<slug>.md) over the
+    raw .quelle.md — the note is the better reference to link.
+    """
+    if not digest:
+        return None
+    raw_dir = Path(vault) / folder / config.RESEARCH_DEEP_RAW_SUBDIR
+    if not raw_dir.is_dir():
+        return None
+    for quelle in sorted(raw_dir.glob("*.quelle.md")):
+        try:
+            head = quelle.read_text(errors="replace")[:2000]
+        except OSError:
+            continue
+        if f"source_hash: {digest}" not in head:
+            continue
+        note = quelle.with_name(quelle.name[: -len(".quelle.md")] + ".md")
+        hit = note if note.exists() else quelle
+        return hit.relative_to(vault).as_posix()
+    return None
 
 
 def _emit(progress, message: str) -> None:
@@ -1356,8 +1429,8 @@ async def run_deep_research(
         _log(plan_text[:1200])
         return
 
-    folder = _slugify(plan.get("folder"), _slugify(topic, "research"))
-    hub_name = (plan.get("hub_name") or topic).strip()
+    folder = _scoped_folder(_slugify(plan.get("folder"), _slugify(topic, "research")), vault)
+    hub_name = _resolve_hub_name(folder, vault, (plan.get("hub_name") or topic).strip())
     themes = [t for t in (plan.get("themes") or []) if isinstance(t, str)]
     src_list = _prepare_sources(plan.get("sources") or [], max_sources)
     if plan.get("note"):

@@ -1,0 +1,23 @@
+[Unit]
+Description=ANVIL Feynman watcher — examine spoken subject explanations against the vault
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/anvil-brain
+# The agent spawns the `claude` CLI, which lives in ~/.local/bin — not on a
+# user service's default PATH, so set it explicitly.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Secrets and ANVIL_* settings live here, chmod 600. The leading "-" makes the
+# file optional so the unit still loads if it is missing.
+EnvironmentFile=-%h/.config/anvil/env
+# --watch checks the recordings folder (ANVIL_FEYNMAN_DIR, default ~/anvil-feynman)
+# every ANVIL_FEYNMAN_POLL_INTERVAL seconds (default 5) and answers new recordings.
+# Set the default subject via ANVIL_FEYNMAN_SUBJECT or a "<subject>__" file prefix.
+ExecStart=%h/anvil-brain/.venv/bin/anvil-feynman --watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

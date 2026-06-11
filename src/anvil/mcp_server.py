@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import asyncio
 import io
+import re
 import threading
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
@@ -28,6 +30,7 @@ from . import config
 from .agent import run_research
 from .builder_inbox import DONE, _dir, list_todo, submit_complaint
 from .cleaner import run_clean, run_digest, run_lint, run_normalize
+from .paths import PROTECTED_DIRS
 from .research import (
     build_research_options,
     run_deep_research,
@@ -86,21 +89,346 @@ async def _run_single_research(topic: str, sources: list[str]) -> None:
     await run_research(topic, sources, options, False)
 
 
+# --- deterministic schema lint + normalize helpers ------------------------------
+# The agent passes in cleaner.py JUDGE (repair links, fill frontmatter); the
+# checks below MEASURE: they validate the vault's master property schema and
+# layout conventions with plain Python — no agent, no tokens — and report the
+# violations. They live HERE (not in cleaner.py) so the deterministic layer
+# stays separate from the agent passes; cli.py imports them for `anvil lint`
+# and `anvil normalize`.
+
+# The master schema's closed set of note types (ANVIL — Schema & Konventionen).
+_NOTE_TYPES = {
+    "concept", "source", "moc", "conversation", "journal",
+    "digest", "project", "task", "report", "system",
+}
+# Topic-cluster roots that must each hold exactly ONE top "*— MOC.md" per folder.
+_TOPIC_ROOTS = (config.RESEARCH_BASE_DIR or "wissen", "projekte")
+# Date-stream folders whose notes carry an ISO date prefix in the filename.
+_DATED_STREAMS = ("journal", "news", "conversations")
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def _read_note(path: Path) -> str:
+    try:
+        return path.read_text(errors="replace")
+    except OSError:
+        return ""
+
+
+def _vault_notes(vault: Path) -> list[Path]:
+    """All .md notes outside the protected dirs (mirrors the cleaner's scope)."""
+    return sorted(
+        p for p in vault.rglob("*.md")
+        if not any(
+            part in PROTECTED_DIRS or part.endswith("venv")
+            for part in p.relative_to(vault).parts
+        )
+    )
+
+
+def _is_system_note(rel: Path) -> bool:
+    """The root system notes (whitelist) — exempt from the tag-canon check."""
+    if len(rel.parts) != 1:
+        return False
+    return rel.name.startswith("ANVIL — ") or rel.name in {
+        Path(config.SCHEMA_FILE).name, Path(config.DIGEST_FILE).name,
+        Path(config.GLOSSARY_FILE).name, Path(config.HOME_FILE).name,
+    }
+
+
+def _parse_frontmatter(text: str) -> dict:
+    """Minimal frontmatter parser (Bordmittel, no YAML dependency).
+
+    Handles scalars, inline `[a, b]` lists and `- item` block lists — the subset
+    the vault's schema actually uses. Unknown shapes are skipped, not guessed.
+    """
+    if not text.startswith("---\n"):
+        return {}
+    end = text.find("\n---", 3)
+    if end == -1:
+        return {}
+    out: dict = {}
+    current: str | None = None  # key of an open block list
+    for line in text[4:end].splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("- "):
+            if current is not None and isinstance(out.get(current), list):
+                item = stripped[2:].strip().strip("\"'")
+                if item:
+                    out[current].append(item)
+            continue
+        m = re.match(r"^([A-Za-z_][\w-]*)\s*:\s*(.*)$", line)
+        if not m:
+            continue
+        key, value = m.group(1), m.group(2).strip()
+        if value.startswith("[") and value.endswith("]"):
+            out[key] = [v.strip().strip("\"'") for v in value[1:-1].split(",") if v.strip()]
+            current = None
+        elif value == "":
+            out[key] = []  # a `- item` block list may follow
+            current = key
+        else:
+            out[key] = value.strip("\"'")
+            current = None
+    return out
+
+
+def _front_list(fm: dict, key: str) -> list[str]:
+    value = fm.get(key) or []
+    return [value] if isinstance(value, str) else [str(v) for v in value]
+
+
+def _link_target(value: str) -> str:
+    """`"[[wissen/X — MOC|Alias]]"` → `X — MOC` (the bare note name)."""
+    v = value.strip().strip("\"'")
+    if v.startswith("[[") and v.endswith("]]"):
+        v = v[2:-2]
+    v = v.split("|")[0].split("/")[-1].strip()
+    return v[:-3] if v.endswith(".md") else v
+
+
+def _is_source_note(note: Path) -> bool:
+    return note.name.endswith(".quelle.md") or note.parent.name == config.RESEARCH_DEEP_RAW_SUBDIR
+
+
+def check_frontmatter(vault: Path) -> list[str]:
+    """(a) Master property schema: type/created/tags everywhere, up: on concepts,
+    source_url + fetched on source notes; unknown type values are violations."""
+    out = []
+    for note in _vault_notes(vault):
+        rel = note.relative_to(vault)
+        fm = _parse_frontmatter(_read_note(note))
+        missing = [k for k in ("type", "created", "tags") if k not in fm]
+        if missing:
+            out.append(f"{rel}: Pflichtfeld(er) fehlen: {', '.join(missing)}")
+        ntype = fm.get("type")
+        if isinstance(ntype, str) and ntype not in _NOTE_TYPES:
+            out.append(f"{rel}: unbekannter type: »{ntype}«")
+        created = fm.get("created")
+        if isinstance(created, str) and not _ISO_DATE_RE.match(created):
+            out.append(f"{rel}: created ist kein ISO-Datum (YYYY-MM-DD): »{created}«")
+        if ntype == "concept" and not _front_list(fm, "up"):
+            out.append(f"{rel}: type: concept ohne up:")
+        if _is_source_note(note) and not (fm.get("source_url") and fm.get("fetched")):
+            out.append(f"{rel}: Quellnotiz ohne source_url/fetched")
+    return out
+
+
+def _glossary_canon(vault: Path) -> tuple[set[str], dict[str, str]]:
+    """Canonical tags + variant→canon map from the glossary's `## Kanonische Tags`
+    section (bullets like ``- `ki` — Varianten: ai, kuenstliche-intelligenz``)."""
+    canon: set[str] = set()
+    variants: dict[str, str] = {}
+    in_section = False
+    for line in _read_note(vault / config.GLOSSARY_FILE).splitlines():
+        if line.startswith("## "):
+            in_section = "kanonische tags" in line.lower()
+            continue
+        if not in_section or "(beispiel)" in line.lower():
+            continue
+        m = re.match(r"^-\s*`([^`\s]+)`", line.strip())
+        if not m:
+            continue
+        canon.add(m.group(1))
+        vm = re.search(r"Varianten:\s*(.+)$", line)
+        if vm:
+            for v in vm.group(1).split(","):
+                v = v.strip().strip("`")
+                if v:
+                    variants[v] = m.group(1)
+    return canon, variants
+
+
+def check_tags(vault: Path) -> list[str]:
+    """(b) Tag-canon enforcement: every frontmatter tag must be a canonical tag
+    from the glossary. No glossary canon yet → nothing to enforce."""
+    canon, variants = _glossary_canon(vault)
+    if not canon:
+        return []
+    offenders: dict[str, list[str]] = {}
+    for note in _vault_notes(vault):
+        rel = note.relative_to(vault)
+        if _is_system_note(rel):
+            continue
+        for tag in _front_list(_parse_frontmatter(_read_note(note)), "tags"):
+            tag = tag.lstrip("#")
+            if tag and tag not in canon:
+                offenders.setdefault(tag, []).append(str(rel))
+    out = []
+    for tag, paths in sorted(offenders.items()):
+        hint = f" (Variante von »{variants[tag]}«)" if tag in variants else ""
+        sample = ", ".join(paths[:3]) + (", …" if len(paths) > 3 else "")
+        out.append(f"Tag »{tag}« nicht im Glossar-Kanon{hint}: {len(paths)} Notiz(en) — {sample}")
+    return out
+
+
+def check_mocs(vault: Path) -> list[str]:
+    """(c) Exactly ONE top "*— MOC.md" per topic folder under wissen/ and projekte/
+    (sub-MOCs hang below it via up:; several MOCs without up: onto each other = violation)."""
+    out = []
+    for root in _TOPIC_ROOTS:
+        base = vault / root
+        if not base.is_dir():
+            continue
+        for folder in sorted(p for p in base.iterdir() if p.is_dir()):
+            mocs = sorted(p for p in folder.iterdir() if p.is_file() and p.name.endswith("— MOC.md"))
+            if not mocs:
+                out.append(f"{folder.relative_to(vault)}: kein »… — MOC.md« im Themenordner")
+                continue
+            names = {m.stem for m in mocs}
+            tops = [
+                m for m in mocs
+                if not ({_link_target(u) for u in _front_list(_parse_frontmatter(_read_note(m)), "up")}
+                        & (names - {m.stem}))
+            ]
+            if len(tops) > 1:
+                listing = ", ".join(m.name for m in tops)
+                out.append(
+                    f"{folder.relative_to(vault)}: {len(tops)} Top-MOCs ohne up: aufeinander — {listing}"
+                )
+    return out
+
+
+def check_unique_names(vault: Path) -> list[str]:
+    """(d) Vault-wide filename uniqueness (basename collisions break [[wikilinks]])."""
+    by_name: dict[str, list[str]] = {}
+    for note in _vault_notes(vault):
+        by_name.setdefault(note.name, []).append(str(note.relative_to(vault)))
+    return [
+        f"Dateiname »{name}« {len(paths)}× im Vault: {', '.join(paths)}"
+        for name, paths in sorted(by_name.items()) if len(paths) > 1
+    ]
+
+
+def check_foreign_files(vault: Path) -> list[str]:
+    """(e) Non-Markdown files outside attachments/ (binaries belong there)."""
+    allowed = {Path(config.DOC_ASSET_DIR).parts[0], Path(config.RESEARCH_ASSET_DIR).parts[0]}
+    out = []
+    for f in sorted(vault.rglob("*")):
+        if not f.is_file() or f.suffix.lower() == ".md" or f.name.startswith("."):
+            continue
+        parts = f.relative_to(vault).parts
+        if parts[0] in allowed or any(
+            p in PROTECTED_DIRS or p.endswith("venv") or p.startswith(".") for p in parts[:-1]
+        ):
+            continue
+        out.append(f"{f.relative_to(vault)}: Nicht-Markdown-Datei außerhalb von {config.DOC_ASSET_DIR}/")
+    return out
+
+
+def check_double_ingest(vault: Path) -> list[str]:
+    """(f) "-2" filename suffix — the signature of a hash-less double ingest.
+
+    Only flagged when the sibling WITHOUT the suffix exists too: "übungsblatt-2.md"
+    is exercise sheet no. 2, not a duplicate, unless "übungsblatt.md" sits next to it.
+    """
+    out = []
+    for note in _vault_notes(vault):
+        stem = note.name[: -len(".md")]
+        quelle = stem.endswith(".quelle")
+        if quelle:
+            stem = stem[: -len(".quelle")]
+        if not stem.endswith("-2"):
+            continue
+        base = stem[: -len("-2")] + (".quelle.md" if quelle else ".md")
+        if (note.parent / base).exists():
+            out.append(f"{note.relative_to(vault)}: »-2«-Suffix neben {base} — wahrscheinlich Doppel-Ingest")
+    return out
+
+
+def check_dated_streams(vault: Path) -> list[str]:
+    """(g) Date streams: notes in journal/, news/, conversations/ carry an ISO date
+    prefix (YYYY-MM-DD-…); the folder's MOC is the one exception."""
+    out = []
+    for stream in _DATED_STREAMS:
+        folder = vault / stream
+        if not folder.is_dir():
+            continue
+        for note in sorted(folder.rglob("*.md")):
+            if note.name.endswith("— MOC.md") or _DATE_PREFIX_RE.match(note.name):
+                continue
+            # Monats-Digests tragen nur YYYY-MM, Index-Notizen gar kein Datum.
+            if note.parent.name == "digests" and re.match(r"^\d{4}-\d{2}", note.name):
+                continue
+            if note.stem in ("News", "Journal — Index"):
+                continue
+            out.append(f"{note.relative_to(vault)}: kein ISO-Datumspräfix (YYYY-MM-DD-…)")
+    return out
+
+
+_LINT_CHECKS = [
+    ("Frontmatter-Schema", check_frontmatter),
+    ("Tag-Glossar", check_tags),
+    ("MOC-Layout", check_mocs),
+    ("Dateinamen-Eindeutigkeit", check_unique_names),
+    ("Fremddateien", check_foreign_files),
+    ("Doppel-Ingest", check_double_ingest),
+    ("Datumsströme", check_dated_streams),
+]
+
+
+def lint_report(vault: Path) -> str:
+    """Run all deterministic checks and render one violations report (German,
+    grouped per check) — the cheap counterpart to the agent lint pass."""
+    sections = []
+    total = 0
+    for title, fn in _LINT_CHECKS:
+        hits = fn(vault)
+        total += len(hits)
+        if hits:
+            sections.append(f"### {title} ({len(hits)})\n" + "\n".join(f"- {h}" for h in hits))
+    if not sections:
+        return "Schema-Lint: keine Verstöße. ✅"
+    return f"Schema-Lint: {total} Verstoß/Verstöße.\n\n" + "\n\n".join(sections)
+
+
+def migrate_conversation_dates(vault: Path) -> list[str]:
+    """conversations/: rename the legacy `date:` frontmatter key to `created:`
+    (the schema's required key) wherever `created:` is missing. Returns the
+    migrated vault-relative paths. Surgical: only the one key line changes."""
+    migrated = []
+    conv = vault / "conversations"
+    if not conv.is_dir():
+        return migrated
+    for note in sorted(conv.rglob("*.md")):
+        text = _read_note(note)
+        if not text.startswith("---\n"):
+            continue
+        end = text.find("\n---", 3)
+        if end == -1:
+            continue
+        head = text[4:end]
+        if re.search(r"^created\s*:", head, re.M) or not re.search(r"^date\s*:", head, re.M):
+            continue
+        head = re.sub(r"^date(\s*:)", r"created\1", head, count=1, flags=re.M)
+        try:
+            note.write_text(text[:4] + head + text[end:])
+        except OSError:
+            continue
+        migrated.append(str(note.relative_to(vault)))
+    return migrated
+
+
 @mcp.tool()
-async def retrieve(question: str) -> str:
+async def retrieve(question: str, full_scope: bool = False) -> str:
     """Answer a question from the ANVIL vault (the user's second brain).
 
     An agent decides how many notes (breadth) and how many linked notes (depth) to pull in,
     builds the context, and answers — citing the notes it used. If the vault does not cover
     the question it files a builder-inbox complaint instead of guessing. Call this whenever
     the user asks something their second brain should know, and call it again when the
-    conversation moves to a new topic that needs fresh context.
+    conversation moves to a new topic that needs fresh context. By default archiv/ and the
+    ops queues are out of scope; full_scope=True searches them too (archived content).
     """
     q = (question or "").strip()
     if not q:
         return "retrieve: leere Frage."
     parts: list[str] = []
-    async for chunk in stream_retrieve(q, config.VAULT_PATH, config.RETRIEVE_MODEL):
+    async for chunk in stream_retrieve(q, config.VAULT_PATH, config.RETRIEVE_MODEL, full_scope=full_scope):
         parts.append(chunk)
     return "\n".join(parts).strip() or "(keine Antwort vom Retrieval-Agenten)"
 
@@ -130,6 +458,16 @@ def inbox_status() -> str:
     return "\n".join(lines)
 
 
+@mcp.tool()
+async def anvil_status() -> str:
+    """Read-only ANVIL-Status: Features, Flags, Queues, Dienste. Secrets redacted."""
+    # Lazy import + Worker-Thread: der doctor-Kern returnt Strings (nie print),
+    # render() schickt alles durch redact_text — stdio bleibt sauber.
+    from . import doctor
+    report = await asyncio.to_thread(doctor.run_status)
+    return doctor.render(report, color=False)
+
+
 # --- vault maintenance + build tools -------------------------------------------
 
 @mcp.tool()
@@ -139,17 +477,26 @@ async def digest() -> str:
 
 
 @mcp.tool()
-async def lint() -> str:
-    """Wiki-consistency pass: fix broken [[links]], dangling citations, missing frontmatter and
-    orphans where safe; report the rest. Non-destructive."""
-    return await _sync_tool(run_lint, False)
+async def lint(checks_only: bool = False) -> str:
+    """Wiki-consistency pass: deterministic schema checks (frontmatter contract, tag canon,
+    MOC layout, filename uniqueness, foreign files, double-ingest, date streams) plus the
+    agent pass that fixes broken [[links]], dangling citations and orphans where safe.
+    checks_only=True runs just the deterministic report (no agent, no tokens). Non-destructive."""
+    report = await asyncio.to_thread(lint_report, Path(config.VAULT_PATH))
+    if checks_only:
+        return report
+    agent_out = await _sync_tool(run_lint, False)
+    return f"{report}\n\n{agent_out}"
 
 
 @mcp.tool()
 async def normalize(all_notes: bool = False) -> str:
     """Apply the glossary to notes: add Obsidian aliases + unify tags (frontmatter only).
-    Default: recently-changed notes; all_notes=True for a full (capped, re-runnable) sweep."""
-    return await _sync_tool(run_normalize, all_notes, False)
+    Default: recently-changed notes; all_notes=True for a full (capped, re-runnable) sweep.
+    Also migrates the legacy conversations `date:` frontmatter key to `created:` first."""
+    migrated = await asyncio.to_thread(migrate_conversation_dates, Path(config.VAULT_PATH))
+    prefix = f"date→created migriert: {len(migrated)} Notiz(en).\n" if migrated else ""
+    return (prefix + await _sync_tool(run_normalize, all_notes, False)).strip()
 
 
 @mcp.tool()
@@ -203,6 +550,34 @@ async def clean_preview() -> str:
     """Preview vault clutter (empty / duplicate / orphan notes) WITHOUT changing anything (dry-run).
     Actual deletion stays on the CLI (`anvil clean`) where it is confirmed and goes to .trash."""
     return await _sync_tool(lambda: run_clean(dry_run=True, verbose=False))
+
+
+# Fitness (Oura + Strava → Tagestrainingsplan): imported lazily so the server
+# starts fine while the module is unconfigured.
+
+@mcp.tool()
+async def fitness_status() -> str:
+    """Status of the fitness module: Oura/Strava auth state, store counts, today's
+    readiness and training load (CTL/ATL/TSB), last plan date. Cheap, no agent run."""
+    from .fitness import status_text
+    return await asyncio.to_thread(status_text)
+
+
+@mcp.tool()
+async def fitness_sync() -> str:
+    """Sync Oura + Strava into the local store and recompute the load metrics.
+    Network-bound but agent-free; safe to call before asking data questions."""
+    from .fitness import run_sync
+    return await asyncio.to_thread(run_sync)
+
+
+@mcp.tool()
+async def fitness_plan() -> str:
+    """Write TODAY's training plan now (heavy: runs the coach agent, overwrites today's
+    plan note if present) and return the summary. Use when the user asks for a fresh plan."""
+    from .fitness import run_plan
+    summary = await run_plan(config.VAULT_PATH, None, force=True, push=False)
+    return summary or "Kein Plan erstellt — `anvil-fitness --status` prüfen."
 
 
 def main() -> None:

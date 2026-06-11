@@ -237,6 +237,15 @@ async def run_tasks_once(
     if verbose and n_rec:
         print(f"[tasks] {n_rec} verwaiste Task(s) → todo/", file=sys.stderr, flush=True)
 
+    # Geplante Prompts (anvil-jobs): der Tick läuft huckepack VOR der Task-Arbeit,
+    # so springen fällige Jobs der (TASK_BATCH=1-)Queue in jedem Zyklus voran.
+    if config.JOBS:
+        from . import jobs
+        try:
+            await jobs.tick(verbose=verbose)
+        except Exception as exc:  # noqa: BLE001 — ein kaputter Tick darf den Worker nicht stoppen
+            print(f"[tasks] jobs-tick error: {exc}", file=sys.stderr, flush=True)
+
     # Post short progress one-liners to the configured notify channel, so a skill you
     # queued from the chat reports back there when it starts, progresses, and finishes.
     from .notify import build_notifier

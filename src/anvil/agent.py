@@ -14,6 +14,7 @@ from claude_agent_sdk import (
     query,
 )
 
+from . import events
 from .prompt import build_system_prompt
 
 DIM = "\033[2m"
@@ -80,6 +81,24 @@ def _render(msg: object, verbose: bool) -> None:
     elif isinstance(msg, ResultMessage) and verbose:
         cost = f" ${msg.total_cost_usd:.4f}" if msg.total_cost_usd else ""
         print(f"{DIM}[{msg.num_turns} turns, {msg.duration_ms} ms{cost}]{RESET}", flush=True)
+
+
+def _publish(msg: object) -> None:
+    """Mirror one SDK message onto the live event feed (best-effort).
+
+    Headless runners (retrieve, builder, feynman) call this per message inside an
+    events.scope(...) block so the dashboard shows agent text and tool calls live.
+    """
+    if isinstance(msg, AssistantMessage):
+        for block in msg.content:
+            if isinstance(block, TextBlock):
+                if block.text.strip():
+                    events.publish("text", block.text)
+            elif isinstance(block, ToolUseBlock):
+                events.publish("tool", f"{block.name} {_tool_hint(block)}".strip())
+    elif isinstance(msg, ResultMessage):
+        cost = f" ${msg.total_cost_usd:.4f}" if msg.total_cost_usd else ""
+        events.publish("log", f"[{msg.num_turns} turns, {msg.duration_ms} ms{cost}]")
 
 
 async def run_once(text: str, options: ClaudeAgentOptions, verbose: bool) -> None:

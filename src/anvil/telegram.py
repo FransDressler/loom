@@ -23,7 +23,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from . import config, inbox, listener, mathpix, mdconvert
+from . import chunking, config, inbox, listener, mathpix, mdconvert
 from .listener import Channel, ChannelError
 
 # Where the channel persists its own getUpdates offset (see TelegramChannel.fetch).
@@ -171,6 +171,9 @@ class TelegramChannel(Channel):
     label = "Telegram"
     # getUpdates never returns the bot's own sends, so incoming is all we ever see.
     capture_own = False
+    # Telegram misst sein Nachrichtenlimit in UTF-16-Code-Units, nicht Codepoints.
+    max_message_len = 4096
+    len_fn = staticmethod(chunking.utf16_len)
 
     def __init__(self) -> None:
         self._pending: str | None = None  # next offset, set during fetch, saved in commit

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
+import json
 import zipfile
 from pathlib import Path
 
@@ -214,6 +216,8 @@ def test_store_raw_source_pdf_forces_pdf_extension(monkeypatch, tmp_path):
     note = (tmp_path / "cluster" / "raw" / "arx.quelle.md").read_text()
     assert "original: attachments/2401.12345.pdf" in note
     assert (tmp_path / "attachments" / "2401.12345.pdf").read_bytes() == b"%PDF bytes"
+    # PDF sources fingerprint the fetched ORIGINAL bytes, not the OCR Markdown
+    assert f"source_hash: {hashlib.sha256(b'%PDF bytes').hexdigest()}" in note
 
 
 # --- _store_raw_source: figure localization + original storage -----------------
@@ -229,6 +233,9 @@ def test_store_raw_source_web_text_only(monkeypatch, tmp_path):
     assert "source_url: https://example.com/a" in note
     assert "original:" not in note  # web sources have no original file
     assert "Some text." in note
+    # web sources fingerprint the converted Markdown (no stable original bytes)
+    expected = hashlib.sha256("# T\n\nSome text.".encode("utf-8", "replace")).hexdigest()
+    assert f"source_hash: {expected}" in note
 
 
 def test_store_raw_source_pdf_localizes_figures_and_stores_original(monkeypatch, tmp_path):
@@ -268,3 +275,105 @@ def test_concept_note_prompt_is_wikipedia_like():
     assert "## Abbildungen" in p       # carries real figures forward from source notes
     assert "Markdown table" in p       # optional comparison table
     assert "mermaid" in p.lower()      # still tells it to skip diagrams (no Schaubilder)
+
+
+# --- RESEARCH_BASE_DIR: cluster folders live under wissen/ ----------------------
+
+def test_scoped_folder_places_new_cluster_under_base(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "RESEARCH_BASE_DIR", "wissen")
+    assert research._scoped_folder("quantenphysik", str(tmp_path)) == "wissen/quantenphysik"
+
+
+def test_scoped_folder_respects_existing_and_explicit(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "RESEARCH_BASE_DIR", "wissen")
+    # already scoped — never doubled
+    assert research._scoped_folder("wissen/x", str(tmp_path)) == "wissen/x"
+    # an explicit path outside the base dir is respected as-is
+    assert research._scoped_folder("projekte/kora", str(tmp_path)) == "projekte/kora"
+    # an existing top-level folder (pre-migration cluster) keeps working in place
+    (tmp_path / "altcluster").mkdir()
+    assert research._scoped_folder("altcluster", str(tmp_path)) == "altcluster"
+
+
+def test_scoped_folder_empty_base_is_noop(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "RESEARCH_BASE_DIR", "")
+    assert research._scoped_folder("quantenphysik", str(tmp_path)) == "quantenphysik"
+
+
+def test_resolve_hub_name_finds_hub_under_base_dir(tmp_path):
+    # The hub search follows the scoped folder: a hub inside wissen/<cluster>/ is
+    # found and reused instead of minting a second MOC.
+    d = tmp_path / "wissen" / "kram"
+    d.mkdir(parents=True)
+    (d / "Kram — MOC.md").write_text("# Kram")
+    assert research._resolve_hub_name("wissen/kram", str(tmp_path), "kram — MOC") == "Kram — MOC"
+
+
+def test_deep_research_creates_cluster_under_base_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "RESEARCH_BASE_DIR", "wissen")
+    monkeypatch.setattr(config, "RESEARCH_DEEP_STORE_RAW", True)
+    plan = {
+        "folder": "testthema",
+        "hub_name": "Testthema — MOC",
+        "themes": ["T"],
+        "sources": [{"slug": "s1", "title": "S1", "url": "https://x/1", "kind": "web", "theme": "T"}],
+    }
+
+    async def fake_plan(prompt, options, label, retries=1):
+        return json.dumps(plan)
+
+    async def fake_capture(prompt, options):
+        return "ok"
+
+    def fake_store_raw(folder, slug, src, vault):
+        raw = Path(vault) / folder / config.RESEARCH_DEEP_RAW_SUBDIR
+        raw.mkdir(parents=True, exist_ok=True)
+        (raw / f"{slug}.quelle.md").write_text("---\nsource_url: x\n---\n")
+        return f"{slug}.quelle"
+
+    captured = {}
+
+    async def fake_integrate(folder, topic, hub, themes, vault, model, *, concurrency, source_notes):
+        captured["folder"], captured["hub"] = folder, hub
+
+    monkeypatch.setattr(research, "_capture_with_retry", fake_plan)
+    monkeypatch.setattr(research, "run_capture", fake_capture)
+    monkeypatch.setattr(research, "_store_raw_source", fake_store_raw)
+    monkeypatch.setattr(research, "_integrate_cluster", fake_integrate)
+
+    asyncio.run(research.run_deep_research("Testthema", [], str(tmp_path), None, False))
+    assert captured["folder"] == "wissen/testthema"  # planner slug landed under the base dir
+    assert captured["hub"] == "Testthema — MOC"
+    assert (tmp_path / "wissen" / "testthema" / "raw" / "s1.quelle.md").exists()
+
+
+# --- source_hash: content fingerprint on every .quelle.md -----------------------
+
+def test_store_raw_local_writes_source_hash(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "DESCRIBE_IMAGES", False)
+    monkeypatch.setattr(config, "RESEARCH_ASSET_DIR", "attachments")
+    monkeypatch.setattr(research.mathpix, "is_configured", lambda: False)
+    monkeypatch.setattr(research.mdconvert, "supports_attachment", lambda mime, name: True)
+    monkeypatch.setattr(research.mdconvert, "convert_bytes", lambda d, m, n: "# Doc\n\ntext")
+    f = tmp_path / "doc.txt"
+    f.write_bytes(b"hello")
+    research._store_raw_local("wissen/kram", "doc", str(f), str(tmp_path))
+    note = (tmp_path / "wissen" / "kram" / "raw" / "doc.quelle.md").read_text()
+    # the fingerprint is of the ORIGINAL file bytes, not the converted Markdown
+    assert f"source_hash: {hashlib.sha256(b'hello').hexdigest()}" in note
+
+
+def test_find_by_source_hash_prefers_the_source_note(tmp_path):
+    raw = tmp_path / "wissen" / "kram" / "raw"
+    raw.mkdir(parents=True)
+    digest = hashlib.sha256(b"inhalt").hexdigest()
+    (raw / "doc.quelle.md").write_text(f"---\nsource_file: x\nsource_hash: {digest}\n---\n")
+    # no sibling note yet -> the raw file itself is the reference
+    found = research._find_by_source_hash("wissen/kram", str(tmp_path), digest)
+    assert found == "wissen/kram/raw/doc.quelle.md"
+    # once the source note exists, it is the better reference
+    (raw / "doc.md").write_text("# Doc")
+    found = research._find_by_source_hash("wissen/kram", str(tmp_path), digest)
+    assert found == "wissen/kram/raw/doc.md"
+    # unknown hash -> no duplicate
+    assert research._find_by_source_hash("wissen/kram", str(tmp_path), "0" * 64) is None

@@ -4,7 +4,8 @@ Runs in two modes:
   * hook mode (default): reads SessionEnd JSON on stdin, then spawns a detached
     worker so closing the session is never blocked.
   * worker mode (--worker): reads the transcript, summarizes it with Sonnet, and
-    writes one Markdown note into <vault>/conversations/.
+    writes one Markdown note into <vault>/conversations/<year>/ (year subfolders
+    keep the fastest-growing folder from becoming a 10k flat dir).
 """
 
 from __future__ import annotations
@@ -191,13 +192,15 @@ def write_note(
     short = session[-8:] if session else ""
     slug = _slugify(title)
 
-    conv_dir = Path(vault) / CONV_DIR
+    conv_base = Path(vault) / CONV_DIR
+    conv_dir = conv_base / today[:4]  # year subfolder, from the session date
     conv_dir.mkdir(parents=True, exist_ok=True)
 
     # Idempotency: if a note for this session already exists, overwrite it.
+    # Recursive so notes in year subfolders (and legacy flat ones) are found.
     existing: Path | None = None
     if short:
-        for note_file in conv_dir.glob("*.md"):
+        for note_file in conv_base.rglob("*.md"):
             try:
                 head = note_file.read_text(errors="replace")[:400]
             except Exception:

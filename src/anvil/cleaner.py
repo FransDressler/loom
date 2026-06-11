@@ -8,9 +8,12 @@ Two jobs, run once a day from a systemd timer:
 
   2. Propose clutter for deletion: empty notes, unreferenced attachments,
      duplicate notes, and stale conversation logs are detected deterministically
-     and texted to you as a numbered list. Nothing is deleted until you reply
-     (e.g. "1 3", "alle", "keine"); the reply is handled by the next iMessage poll
-     via try_resolve(). Confirmed deletions move to <vault>/.trash by default.
+     and texted to you as a numbered list. Old sessions from completed months are
+     first condensed into a monthly digest (conversations/digests/) and proposed
+     as MOVES into archiv/<year>/ instead of deletions. Nothing is deleted until
+     you reply (e.g. "1 3", "alle", "keine"); the reply is handled by the next
+     iMessage poll via try_resolve(). Confirmed deletions move to <vault>/.trash
+     by default.
 
 Usage:
     anvil-cleaner --run        garden + propose deletions, then exit
@@ -26,14 +29,19 @@ import re
 import shutil
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 from . import config, confirm
 from .agent import ALLOWED_TOOLS, build_options
+from .paths import PROTECTED_DIRS, READONLY_DIRS
 
 # Action kind under which deletions go through the shared propose-and-confirm
 # queue (confirm.py). The cleaner enqueues one of these per clutter candidate.
 DELETE_KIND = "delete_note"
+# Action kind for vault-internal moves (old sessions → archiv/): same confirm
+# mechanic as deletions, just move instead of delete.
+MOVE_KIND = "move_note"
 # Header for the LOCAL interactive proposal (anvil-cleaner --dry-run / run_clean).
 # The iMessage flow uses confirm.PROPOSAL_PREFIX instead.
 PROPOSAL_PREFIX = "🧹 ANVIL Cleaner"
@@ -42,7 +50,16 @@ PROPOSAL_PREFIX = "🧹 ANVIL Cleaner"
 _DIGEST_RECENT_CAP = 60
 # Cap how many notes one normalize pass rewrites (re-runnable for the rest).
 _NORMALIZE_CAP = 40
-_PROTECTED_DIRS = {".obsidian", ".trash", ".git", "node_modules"}
+# PROTECTED_DIRS / READONLY_DIRS live in anvil.paths (single source for the
+# former per-module literals). Protected dirs are never touched at all; read-only
+# dirs (the PARA archive) are kept out of every fold-in/rewrite pass below but
+# stay delete-protected only via the normal confirm mechanic.
+# Subfolder of conversations/ that holds the monthly session digests; they
+# survive the sessions they condense and are never proposed as "old logs".
+CONV_DIGEST_SUBDIR = "digests"
+# Markers delimiting the generated section the cleaner re-renders in every MOC.
+MOC_AUTO_START = "<!-- anvil:auto -->"
+MOC_AUTO_END = "<!-- /anvil:auto -->"
 
 _TIDY_PROMPT = (
     "Führe einen Aufräum- und Gärtner-Durchlauf über den gesamten Vault aus. "
@@ -52,7 +69,9 @@ _TIDY_PROMPT = (
     "die wichtigste Aufgabe, (4) bei Bedarf Index-/MOC-Notizen für thematische Cluster "
     "anlegen und in den Home-Index aufnehmen. "
     "Lösche oder verschiebe KEINE Dateien und überschreibe keine Notiz vollständig — "
-    "arbeite chirurgisch und bewahre Sprache und Formatierung. (5) Wenn sich die Struktur "
+    "arbeite chirurgisch und bewahre Sprache und Formatierung. Das Archiv "
+    f"({config.ARCHIV_DIR}/) ist read-only — lies es bei Bedarf, ändere dort aber nichts. "
+    "(5) Wenn sich die Struktur "
     "oder Konventionen geändert haben, aktualisiere die Schema-Notiz des Vaults entsprechend. "
     "Fasse am Ende in 1–2 Sätzen zusammen, was du verbessert hast."
 )
@@ -67,7 +86,8 @@ _FOLDIN_PROMPT = (
     "knappe 1-Zeilen-Einordnung mit [[Link]] auf die lose Notiz — chirurgisch, nichts überschreiben.\n"
     "3. Gibt es keine sinnvolle Passung, lass die lose Notiz unverändert.\n"
     "Lösche oder verschiebe NIE eine Datei, überschreibe keine Notiz vollständig, bewahre Sprache "
-    "und Formatierung, und rühre .obsidian/ und .trash/ nicht an. Fasse am Ende in 1–2 Sätzen "
+    f"und Formatierung, und rühre .obsidian/, .trash/ und das read-only-Archiv ({config.ARCHIV_DIR}/) "
+    "nicht an. Fasse am Ende in 1–2 Sätzen "
     "zusammen, was du eingefaltet hast.\n\n"
     "Lose Notizen:\n{notes}"
 )
@@ -82,8 +102,11 @@ _LINT_PROMPT = (
     "3. Fehlende Frontmatter (created, tags) — ergänzen.\n"
     "4. Verwaiste Notizen (weder ein- noch ausgehende Links): mit einer eindeutig passenden Notiz "
     "verlinken, sonst auflisten.\n"
+    "5. Root-Whitelist: direkt im Vault-Root liegen NUR die ANVIL-Systemnotizen. Folgende Notizen "
+    "verletzen das aktuell — NUR melden, nicht verschieben:\n{root_violations}\n"
     "Lösche oder verschiebe NIE Dateien, überschreibe keine Notiz vollständig, und rühre "
-    ".obsidian/, .trash/ sowie die System-Notizen (Schema, Home-Index, Digest) nicht an. Bewahre "
+    f".obsidian/, .trash/, das read-only-Archiv ({config.ARCHIV_DIR}/) sowie die System-Notizen "
+    "(Schema, Home-Index, Digest) nicht an. Bewahre "
     "Sprache und Formatierung. Fasse am Ende klar zusammen: was REPARIERT wurde und was nur "
     "GEMELDET wird (mit Pfaden)."
 )
@@ -115,7 +138,8 @@ _NORMALIZE_PROMPT = (
     "nicht zusätzlich anhäufen).\n"
     "4. Fehlt im Glossar ein klares Synonym-/Übersetzungspaar, das dir hier begegnet, ergänze es dort.\n"
     "Arbeite chirurgisch: i.d.R. nur die Frontmatter anfassen, Fließtext/Struktur/Sprache "
-    "unverändert lassen. Lösche oder verschiebe NIE Dateien, rühre .obsidian/, .trash/ und die "
+    "unverändert lassen. Lösche oder verschiebe NIE Dateien, rühre .obsidian/, .trash/, "
+    f"{config.ARCHIV_DIR}/ und die "
     "System-Notizen nicht an. Fasse am Ende in 1–2 Sätzen zusammen, was du normiert hast.\n\n"
     "Notizen:\n{notes}"
 )
@@ -124,7 +148,12 @@ _NORMALIZE_PROMPT = (
 # --- filesystem helpers --------------------------------------------------------
 
 def _is_protected(rel: Path) -> bool:
-    return any(part in _PROTECTED_DIRS or part.endswith("venv") for part in rel.parts)
+    return any(part in PROTECTED_DIRS or part.endswith("venv") for part in rel.parts)
+
+
+def _is_readonly(rel: Path) -> bool:
+    """True under a read-only dir (archiv/): never folded in or rewritten."""
+    return any(part in READONLY_DIRS for part in rel.parts)
 
 
 def _notes(vault: Path) -> list[Path]:
@@ -147,6 +176,24 @@ def _strip_frontmatter(text: str) -> str:
         if end != -1:
             return text[end + 4:]
     return text
+
+
+def _frontmatter_block(text: str) -> str:
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            return text[3:end]
+    return ""
+
+
+def _frontmatter_fields(text: str) -> dict[str, str]:
+    """Flat `key: value` pairs from the frontmatter (no YAML lib on board)."""
+    fields: dict[str, str] = {}
+    for line in _frontmatter_block(text).splitlines():
+        m = re.match(r"([A-Za-z_][\w-]*):\s*(.*)$", line)
+        if m:
+            fields[m.group(1)] = m.group(2).strip().strip("\"'")
+    return fields
 
 
 _EMBED_RE = re.compile(r"!\[\[[^\]]+\]\]|!\[[^\]]*\]\([^)]+\)")
@@ -213,11 +260,116 @@ def find_old_conversations(vault: Path) -> list[tuple[str, str]]:
         return []
     cutoff = time.time() - config.CLEANER_CONV_MAX_AGE_DAYS * 86400
     out = []
-    for note in sorted(conv.glob("*.md")):
+    for note in sorted(conv.rglob("*.md")):  # recursive: year subfolders (conversations/2026/…)
+        if CONV_DIGEST_SUBDIR in note.relative_to(conv).parts[:-1]:
+            continue  # monthly digests survive the sessions they condense
         if note.stat().st_mtime < cutoff:
             age = int((time.time() - note.stat().st_mtime) / 86400)
             out.append((str(note.relative_to(vault)), f"altes Conversation-Log ({age} Tage)"))
     return out
+
+
+# --- monthly session digests + archive moves -------------------------------------
+
+_ISO_MONTH_RE = re.compile(r"^(\d{4}-\d{2})-\d{2}")
+
+
+def _note_month(note: Path) -> str:
+    """YYYY-MM of a session note: filename ISO prefix, else frontmatter, else mtime."""
+    m = _ISO_MONTH_RE.match(note.name)
+    if m:
+        return m.group(1)
+    fields = _frontmatter_fields(_read(note))
+    for key in ("created", "date"):
+        m = _ISO_MONTH_RE.match(fields.get(key, ""))
+        if m:
+            return m.group(1)
+    return time.strftime("%Y-%m", time.localtime(note.stat().st_mtime))
+
+
+def find_archivable_conversations(vault: Path) -> dict[str, list[Path]]:
+    """Sessions older than CLEANER_CONV_MAX_AGE_DAYS, grouped by COMPLETED month.
+
+    The current month is never returned — a month gets digested once it is over.
+    """
+    conv = vault / "conversations"
+    if not conv.is_dir():
+        return {}
+    cutoff = time.time() - config.CLEANER_CONV_MAX_AGE_DAYS * 86400
+    current = date.today().strftime("%Y-%m")
+    groups: dict[str, list[Path]] = {}
+    for note in sorted(conv.rglob("*.md")):
+        if CONV_DIGEST_SUBDIR in note.relative_to(conv).parts[:-1]:
+            continue
+        if note.stat().st_mtime >= cutoff:
+            continue
+        month = _note_month(note)
+        if month >= current:
+            continue
+        groups.setdefault(month, []).append(note)
+    return groups
+
+
+def write_month_digest(vault: Path, month: str, notes: list[Path]) -> Path:
+    """(Re)write conversations/digests/<YYYY-MM>-digest.md — purely mechanical.
+
+    One line per session from frontmatter title/project (no LLM call). Idempotent:
+    an existing digest only gets entries appended that it does not list yet, so a
+    re-run after the sessions moved to archiv/ never empties it.
+    """
+    digest_dir = vault / "conversations" / CONV_DIGEST_SUBDIR
+    digest_dir.mkdir(parents=True, exist_ok=True)
+    path = digest_dir / f"{month}-digest.md"
+
+    entries: list[tuple[str, str]] = []
+    for note in sorted(notes):
+        fields = _frontmatter_fields(_read(note))
+        title = fields.get("title") or note.stem
+        project = fields.get("project", "")
+        line = f"- [[{note.stem}]] — {title}" + (f" (Projekt: {project})" if project else "")
+        entries.append((note.stem, line))
+
+    if path.exists():
+        text = _read(path)
+        new = [line for stem, line in entries if f"[[{stem}]]" not in text]
+        if new:
+            path.write_text(text.rstrip("\n") + "\n" + "\n".join(new) + "\n")
+        return path
+
+    head = (
+        "---\n"
+        "type: digest\n"
+        f"created: {date.today().isoformat()}\n"
+        "tags: [conversation, digest]\n"
+        "---\n\n"
+        f"# Conversations {month} — Digest\n\n"
+        f"{len(entries)} Session(s), mechanisch verdichtet vor dem Archiv-Move.\n\n"
+    )
+    path.write_text(head + "\n".join(line for _, line in entries) + "\n")
+    return path
+
+
+def propose_month_archives(vault: Path, verbose: bool = False) -> list[dict]:
+    """Digest each completed month of old sessions, return the archive-move actions.
+
+    The digest is written immediately (a new, non-destructive note); the session
+    moves to archiv/<year>/conversations/<YYYY-MM>/ go through the confirm queue —
+    the same mechanic as the deletion proposals, just move instead of delete.
+    """
+    actions: list[dict] = []
+    for month, notes in sorted(find_archivable_conversations(vault).items()):
+        write_month_digest(vault, month, notes)
+        dest_dir = f"{config.ARCHIV_DIR}/{month[:4]}/conversations/{month}"
+        for note in notes:
+            rel = str(note.relative_to(vault))
+            actions.append({
+                "kind": MOVE_KIND,
+                "summary": f"📦 {rel} — alte Session, Monats-Digest {month} existiert (→ {dest_dir}/)",
+                "payload": {"path": rel, "dest": f"{dest_dir}/{note.name}"},
+            })
+    if verbose and actions:
+        print(f"cleaner: {len(actions)} session(s) als Archiv-Move vorgeschlagen", file=sys.stderr, flush=True)
+    return actions
 
 
 def _is_hub(path: Path) -> bool:
@@ -228,27 +380,50 @@ def _is_hub(path: Path) -> bool:
 def _is_system_note(rel: str, vault: Path) -> bool:
     """True for notes ANVIL maintains and must never delete or fold in.
 
-    The home index, the vault schema note, and the digest note.
+    The home index, the vault schema note, the glossary, and the digest note.
     """
     name = Path(rel).name
     return (
         name == Path(config.SCHEMA_FILE).name
         or name == Path(config.DIGEST_FILE).name
         or name == Path(config.GLOSSARY_FILE).name
-        or name.startswith("ANVIL — Archive for Notes")
+        or name == Path(config.HOME_FILE).name
     )
+
+
+# The vault root is whitelist-only: exactly the six ANVIL system notes live there.
+# The two documentation notes are referenced nowhere else in code, so their names
+# live here instead of in config.
+_ROOT_EXTRA_NOTES = {"ANVIL — Dokumente einwerfen.md", "ANVIL — Lokaler Scheduler Setup.md"}
+
+
+def root_whitelist() -> set[str]:
+    return {
+        Path(config.HOME_FILE).name,
+        Path(config.SCHEMA_FILE).name,
+        Path(config.DIGEST_FILE).name,
+        Path(config.GLOSSARY_FILE).name,
+        *_ROOT_EXTRA_NOTES,
+    }
+
+
+def find_root_violations(vault: Path) -> list[str]:
+    """Lint check: every .md directly in the vault root that is not whitelisted."""
+    allowed = root_whitelist()
+    return sorted(p.name for p in vault.glob("*.md") if p.name not in allowed)
 
 
 def find_recent(vault: Path, days: int) -> list[Path]:
     """All non-system notes (any folder) modified within `days`, for the digest.
 
-    Skips protected dirs, raw `*.quelle.md` full-text files, and system notes.
+    Skips protected and read-only dirs (archiv/ is never rewritten), raw
+    `*.quelle.md` full-text files, and system notes.
     """
     cutoff = time.time() - days * 86400
     out = []
     for note in _notes(vault):
         rel = note.relative_to(vault)
-        if note.name.endswith(".quelle.md") or _is_system_note(str(rel), vault):
+        if _is_readonly(rel) or note.name.endswith(".quelle.md") or _is_system_note(str(rel), vault):
             continue
         if note.stat().st_mtime >= cutoff:
             out.append(note)
@@ -256,20 +431,29 @@ def find_recent(vault: Path, days: int) -> list[Path]:
 
 
 def find_loose_recent(vault: Path) -> list[Path]:
-    """Root-level notes modified within the fold-in window, minus index/hubs.
+    """Capture-scope notes (vault root + eingang/) modified within the fold-in
+    window, minus index/hubs.
 
-    Loose captures live at the vault root; clustered notes (AQC/, trading/,
-    research clusters) sit in subfolders and are left to their own structure.
+    Loose captures land at the vault root (legacy) or in the eingang/ inbox;
+    clustered notes (wissen/, projekte/, research clusters) sit deeper and are
+    left to their own structure. eingang's raw/ layer stays untouched.
     """
     cutoff = time.time() - config.CLEANER_FOLDIN_MAX_AGE_DAYS * 86400
+    scopes = [vault]
+    ingest = vault / config.INGEST_FOLDER
+    if ingest.is_dir():
+        scopes.append(ingest)
     out = []
-    for note in sorted(vault.glob("*.md")):  # root-level only
-        rel = str(note.relative_to(vault))
-        if _is_protected(note.relative_to(vault)) or _is_hub(note) or _is_system_note(rel, vault):
-            continue
-        if note.stat().st_mtime < cutoff:
-            continue
-        out.append(note)
+    for folder in scopes:
+        for note in sorted(folder.glob("*.md")):  # flat per scope, no recursion
+            rel = str(note.relative_to(vault))
+            if note.name.endswith(".quelle.md"):
+                continue
+            if _is_protected(note.relative_to(vault)) or _is_hub(note) or _is_system_note(rel, vault):
+                continue
+            if note.stat().st_mtime < cutoff:
+                continue
+            out.append(note)
     return out
 
 
@@ -324,9 +508,31 @@ def _delete_handler(payload: dict) -> str:
     return f"⚠️ {rel}: nicht gefunden (schon entfernt?)"
 
 
+def _move_handler(payload: dict) -> str:
+    """confirm handler for MOVE_KIND: move one note to a vault-relative dest.
+
+    payload = {"path": "<vault-relative src>", "dest": "<vault-relative dest>"}.
+    Used by the monthly session archiving (conversations → archiv/<year>/…).
+    Recoverable by nature — the note is moved inside the vault, not deleted.
+    """
+    vault = Path(config.VAULT_PATH)
+    rel = str(payload.get("path", ""))
+    dest = str(payload.get("dest", ""))
+    src = vault / rel
+    if not dest or not src.exists():
+        return f"⚠️ {rel}: nicht gefunden (schon verschoben?)"
+    target = vault / dest
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target = target.with_name(f"{target.stem}-{int(time.time())}{target.suffix}")
+    shutil.move(str(src), str(target))
+    return f"📦 {rel} → {dest}"
+
+
 # Registered at import so any process that imports cleaner (e.g. the iMessage
-# poller) can resolve a pending deletion confirmation via confirm.try_resolve.
+# poller) can resolve a pending deletion/move confirmation via confirm.try_resolve.
 confirm.register(DELETE_KIND, _delete_handler)
+confirm.register(MOVE_KIND, _move_handler)
 
 
 # --- proposal + resolution -----------------------------------------------------
@@ -392,12 +598,14 @@ def run_lint(verbose: bool = False) -> None:
     """Wiki-consistency pass: fix the safe cases, report the rest. Non-destructive."""
     from .agent import run_once
 
+    violations = find_root_violations(Path(config.VAULT_PATH))
+    listing = "\n".join(f"- {name}" for name in violations) or "(keine)"
     options = build_options(config.VAULT_PATH, config.MODEL)
     options.max_turns = config.CLEANER_LINT_MAX_TURNS
     options.allowed_tools = ALLOWED_TOOLS  # Read/Write/Edit/Glob/Grep/Web* — no delete tool exists
     if verbose:
-        print("cleaner: lint pass…", file=sys.stderr, flush=True)
-    asyncio.run(run_once(_LINT_PROMPT, options, verbose))
+        print(f"cleaner: lint pass ({len(violations)} Root-Verstoß/Verstöße)…", file=sys.stderr, flush=True)
+    asyncio.run(run_once(_LINT_PROMPT.format(root_violations=listing), options, verbose))
 
 
 def run_digest(verbose: bool = False) -> None:
@@ -437,6 +645,7 @@ def run_normalize(all_notes: bool = False, verbose: bool = False) -> None:
         notes = [
             p for p in _notes(vault)
             if not p.name.endswith(".quelle.md")
+            and not _is_readonly(p.relative_to(vault))  # archiv/ is never rewritten
             and not _is_system_note(str(p.relative_to(vault)), vault)
         ]
     else:
@@ -462,6 +671,101 @@ def run_normalize(all_notes: bool = False, verbose: bool = False) -> None:
     asyncio.run(run_once(_NORMALIZE_PROMPT.format(notes=listing), options, verbose))
 
 
+# --- MOC auto sections -----------------------------------------------------------
+
+def _up_targets(text: str) -> list[str]:
+    """Link targets of the frontmatter `up:` property (inline or block list).
+
+    Aliases, headings and folder prefixes are stripped, so `[[wissen/x/Y — MOC|Y]]`
+    resolves to "Y — MOC".
+    """
+    lines = _frontmatter_block(text).splitlines()
+    chunk_parts: list[str] = []
+    for i, line in enumerate(lines):
+        m = re.match(r"up:\s*(.*)$", line)
+        if m is None:
+            continue
+        inline = m.group(1).strip()
+        if inline and inline != "[]":
+            chunk_parts.append(inline)
+        else:  # YAML block list: the following "  - …" lines
+            for follow in lines[i + 1:]:
+                if re.match(r"\s+-\s", follow):
+                    chunk_parts.append(follow)
+                else:
+                    break
+        break
+    targets = []
+    for raw in re.findall(r"\[\[([^\]]+)\]\]", "\n".join(chunk_parts)):
+        t = raw.split("|")[0].split("#")[0].strip().split("/")[-1]
+        targets.append(t.removesuffix(".md"))
+    return targets
+
+
+def _render_auto_section(vault: Path, children: list[Path]) -> str:
+    lines = [
+        MOC_AUTO_START,
+        "_Automatisch aus `up:`-Properties gerendert — nicht von Hand bearbeiten._",
+    ]
+    if not children:
+        lines.append("_(keine Notizen verlinken hierher)_")
+    else:
+        groups: dict[str, list[Path]] = {}
+        for child in sorted(children):
+            groups.setdefault(str(child.relative_to(vault).parent), []).append(child)
+        for folder in sorted(groups):
+            lines.append("")
+            lines.append(f"### {folder if folder != '.' else '(Vault-Root)'}")
+            lines += [f"- [[{c.stem}]]" for c in groups[folder]]
+    lines.append(MOC_AUTO_END)
+    return "\n".join(lines)
+
+
+def _splice_auto_section(text: str, section: str) -> str:
+    """Replace the marker-delimited section, or append it at the end of the note."""
+    start = text.find(MOC_AUTO_START)
+    end = text.find(MOC_AUTO_END)
+    if start != -1 and end != -1 and end >= start:
+        return text[:start] + section + text[end + len(MOC_AUTO_END):]
+    if start != -1:
+        # Orphaned START marker (e.g. an interrupted earlier write left no END):
+        # cut it off before appending, or the note would accumulate a second
+        # START marker and the next splice would corrupt the text.
+        text = text[:start]
+    return text.rstrip("\n") + "\n\n" + section + "\n"
+
+
+def render_moc_auto_sections(vault: Path, verbose: bool = False) -> int:
+    """Re-render the generated section of every "*— MOC.md" from up: properties.
+
+    Deterministic (no agent run): collects every note whose `up:` links to a MOC,
+    grouped by folder, and rewrites the section between the anvil:auto markers
+    (appending it when the markers are missing). archiv/ stays untouched — its
+    MOCs are not rewritten and its notes are not listed. Returns #MOCs changed.
+    """
+    notes = [n for n in _notes(vault) if not _is_readonly(n.relative_to(vault))]
+    by_target: dict[str, list[Path]] = {}
+    for note in notes:
+        if note.name.endswith(".quelle.md"):
+            continue
+        for target in _up_targets(_read(note)):
+            by_target.setdefault(target.casefold(), []).append(note)
+
+    changed = 0
+    for moc in notes:
+        if not moc.stem.endswith("— MOC"):
+            continue
+        children = [c for c in by_target.get(moc.stem.casefold(), []) if c != moc]
+        text = _read(moc)
+        new_text = _splice_auto_section(text, _render_auto_section(vault, children))
+        if new_text != text:
+            moc.write_text(new_text)
+            changed += 1
+    if verbose:
+        print(f"cleaner: moc-auto pass — {changed} MOC(s) aktualisiert", file=sys.stderr, flush=True)
+    return changed
+
+
 # --- orchestration -------------------------------------------------------------
 
 def _garden(verbose: bool = False) -> None:
@@ -473,10 +777,19 @@ def _garden(verbose: bool = False) -> None:
         passes.append(("fold-in", lambda: run_foldin(verbose)))
     if config.CLEANER_LINT:
         passes.append(("lint", lambda: run_lint(verbose)))
+    # Deterministic, no agent/tokens: re-render every MOC's generated section.
+    passes.append(("moc-auto", lambda: render_moc_auto_sections(Path(config.VAULT_PATH), verbose=verbose)))
     if config.CLEANER_NORMALIZE:
         passes.append(("normalize", lambda: run_normalize(all_notes=False, verbose=verbose)))
     if config.CLEANER_DIGEST:
         passes.append(("digest", lambda: run_digest(verbose)))
+    if config.CLEANER_CONSOLIDATE:
+        # Sleep-time memory: distill chat histories into episodes + memory surfaces
+        # (dry-run by default; see consolidate.py). Runs after the other passes, so
+        # the freshly tidied vault is what the distillates link into.
+        from .consolidate import run_consolidate
+
+        passes.append(("consolidate", lambda: run_consolidate(verbose)))
     for name, fn in passes:
         if verbose:
             print(f"cleaner: {name} pass…", file=sys.stderr, flush=True)
@@ -540,9 +853,23 @@ def run(verbose: bool = False) -> None:
     _garden(verbose)
 
     items = collect_candidates(vault)
+    # Old sessions from completed months get digested + proposed as archive MOVES
+    # instead of deletions; drop their delete candidates so one note never carries
+    # two competing proposals. CLEANER_OLD_CONVERSATIONS deliberately gates BOTH
+    # paths: collect_candidates() only scans old sessions under the same flag, so
+    # with the flag off neither deletes nor moves are proposed for them — the
+    # dedup below can therefore never silently degrade moves into deletes.
+    moves: list[dict] = []
+    if config.CLEANER_OLD_CONVERSATIONS:
+        moves = propose_month_archives(vault, verbose=verbose)
+        moved = {a["payload"]["path"] for a in moves}
+        items = [it for it in items if it["path"] not in moved]
     if verbose:
-        print(f"cleaner: {len(items)} deletion candidate(s)", file=sys.stderr, flush=True)
-    if not items:
+        print(
+            f"cleaner: {len(items)} deletion candidate(s), {len(moves)} archive move(s)",
+            file=sys.stderr, flush=True,
+        )
+    if not items and not moves:
         return
 
     chat = config.BB_CHAT_GUID
@@ -550,9 +877,11 @@ def run(verbose: bool = False) -> None:
         print("cleaner: ANVIL_BB_CHAT_GUID not set — candidates found but cannot ask.", file=sys.stderr)
         for it in items:
             print(f"  - {it['path']} — {it['reason']}", file=sys.stderr)
+        for act in moves:
+            print(f"  - {act['summary']}", file=sys.stderr)
         return
 
-    actions = _as_actions(items)
+    actions = _as_actions(items) + moves
     confirm.enqueue(chat, actions)
     try:
         confirm.send_proposal(chat, actions)

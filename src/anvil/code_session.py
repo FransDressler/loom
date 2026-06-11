@@ -22,7 +22,7 @@ from pathlib import Path
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from . import config
+from . import config, redact
 
 CODE_TOOL = "mcp__anvil_code__run_code_task"
 
@@ -71,12 +71,18 @@ async def run_code_task(task: str, *, cwd: str | None = None, model: str | None 
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, cwd=cwd,
+            # Worker-Secrets (Bot-Tokens, WAHA-Key, Web-Token aus ~/.config/anvil/env)
+            # nicht an die Vollrechte-Session vererben. Defense-in-depth, KEIN
+            # Sandbox-Ersatz: die Session kann die env-Datei weiterhin von Platte
+            # lesen — sie bekommt die Werte nur nicht frei Haus ins Environment.
+            env=redact.scrub_env(dict(os.environ)),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             start_new_session=True,  # own process group, so a timeout kills the whole tree
         )
     except Exception as exc:  # noqa: BLE001 — surface the launch failure to the chat
-        return f"⚠️ Code-Session: Start fehlgeschlagen: {exc}"
+        # Exception-Texte können Umgebungsdetails zitieren — auch hier maskieren.
+        return redact.redact_text(f"⚠️ Code-Session: Start fehlgeschlagen: {exc}")
     try:
         out, _ = await asyncio.wait_for(
             proc.communicate(input=task.encode()), timeout=config.CODE_TIMEOUT_S
@@ -106,6 +112,10 @@ async def run_code_task(task: str, *, cwd: str | None = None, model: str | None 
     changed = (f"📝 Geändert:\n{stat[: config.CODE_DIFF_MAX_CHARS]}"
                if stat.strip() else "📝 (keine Datei-Änderungen)")
     result = f"✅ Code-Session fertig.\n{summary}\n\n{changed}"
+    # Summary wie Diff können Secrets wörtlich enthalten (claude hat z.B. eine
+    # env-Datei angefasst) — maskieren, BEVOR der Text via inbox.emit in
+    # WhatsApp/Telegram landet.
+    result = redact.redact_text(result)
     # Keep the message under the chat transports' ~1500-char cap, with an explicit
     # marker instead of a silent tail-cut (the full diff is in the repo anyway).
     if len(result) > config.CODE_RESULT_MAX_CHARS:

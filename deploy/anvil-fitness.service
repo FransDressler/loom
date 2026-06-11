@@ -1,0 +1,14 @@
+[Unit]
+Description=ANVIL fitness — Oura/Strava-Sync, Tagestrainingsplan & Workout-Analysen
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/anvil-brain
+# The coach agents spawn the `claude` CLI, which lives in ~/.local/bin — not on a
+# user service's default PATH, so set it explicitly.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Secrets (ANVIL_OURA_*/ANVIL_STRAVA_* client credentials) live here, chmod 600.
+EnvironmentFile=-%h/.config/anvil/env
+ExecStart=%h/anvil-brain/.venv/bin/anvil-fitness --daily

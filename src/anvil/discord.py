@@ -129,6 +129,7 @@ class DiscordChannel(Channel):
     name = "discord"
     label = "Discord"
     capture_own = False  # the bot's own messages appear in the channel; drop them
+    max_message_len = 2000  # Discords Limit pro Nachricht
 
     def __init__(self) -> None:
         self._pending: str | None = None  # next cursor, set during fetch, saved in commit
