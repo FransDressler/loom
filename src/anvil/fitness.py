@@ -647,9 +647,40 @@ def build_day_context(conn: sqlite3.Connection, day: date) -> str:
         vol = " · ".join(f"{w['week']}: {round(w['h'], 1)} h / {int(w['t'])} TSS" for w in weeks)
         lines += ["", f"**Wochenvolumen (alle Sportarten):** {vol}"]
 
+    extern = _external_load_block(day)
+    if extern:
+        lines += ["", extern]
+
     if config.FITNESS_GOALS:
         lines += ["", f"**Ziele:** {config.FITNESS_GOALS}"]
     return "\n".join(lines)[:8000]
+
+
+def _external_load_block(day: date) -> str:
+    """Kalender-Last als Kontextabschnitt für den Coach — '' wenn Kalender aus,
+    leer oder kaputt (saubere Degradation: der Abschnitt fehlt dann einfach;
+    der Plan-Prompt behandelt ihn als optional)."""
+    if not getattr(config, "CALENDAR", False):
+        return ""
+    try:
+        from . import calsync
+
+        w = calsync.workload(day, 7)
+    except Exception as exc:  # noqa: BLE001 — Kalenderprobleme dürfen den Coach nie stoppen
+        print(f"[fitness] Kalender-Last nicht verfügbar: {exc}", file=sys.stderr)
+        return ""
+    busy = w.get("busy_hours") or {}
+    today_h = busy.get(day.isoformat(), 0)
+    week_h = round(sum(busy.values()), 1)
+    lines = [f"**Externe Last (Kalender):** heute {today_h} h Termine · "
+             f"kommende 7 Tage {week_h} h"]
+    exams = (w.get("exams") or [])[:3]
+    if exams:
+        lines.append("  Klausuren: " + " · ".join(
+            f"{e['title']} in {e['days_left']} Tag(en)" for e in exams))
+    for warn in (w.get("warnings") or [])[:2]:
+        lines.append(f"  ⚠️ {warn}")
+    return "\n".join(lines)
 
 
 # --- vault scaffold -----------------------------------------------------------------

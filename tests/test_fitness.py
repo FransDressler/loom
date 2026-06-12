@@ -445,3 +445,55 @@ def test_run_plan_reports_unwritten_note(env, monkeypatch):
     result = asyncio.run(fitness.run_plan(str(vault)))
     assert result is not None and "nicht geschrieben" in result
     assert fitness._load_state().get("last_plan_day") != date.today().isoformat()
+
+
+# --- Phase 4: Kalender-Workload als Coach-Input ------------------------------------
+
+def test_day_context_omits_external_load_when_calendar_off(env, monkeypatch):
+    monkeypatch.setattr(config, "CALENDAR", False)
+    conn = fitness.open_db()
+    try:
+        ctx = fitness.build_day_context(conn, date.today())
+    finally:
+        conn.close()
+    assert "Externe Last" not in ctx
+
+
+def test_day_context_includes_external_load(env, monkeypatch):
+    monkeypatch.setattr(config, "CALENDAR", True)
+
+    import anvil.calsync as calsync
+
+    today = date.today()
+    monkeypatch.setattr(calsync, "workload", lambda day, days=7: {
+        "events": [], "free_blocks": [],
+        "busy_hours": {today.isoformat(): 5.5, (today + timedelta(days=1)).isoformat(): 2.0},
+        "exams": [{"title": "MW-Klausur", "date": "x", "days_left": 9}],
+        "warnings": ["Kalender-Cache ist 2 h alt"],
+    })
+    conn = fitness.open_db()
+    try:
+        ctx = fitness.build_day_context(conn, today)
+    finally:
+        conn.close()
+    assert "Externe Last" in ctx and "5.5 h" in ctx
+    assert "MW-Klausur in 9 Tag(en)" in ctx
+    assert "Kalender-Cache ist 2 h alt" in ctx
+
+
+def test_day_context_survives_broken_calendar(env, monkeypatch):
+    """Kalenderprobleme dürfen den Coach nie stoppen — Abschnitt fehlt einfach."""
+    monkeypatch.setattr(config, "CALENDAR", True)
+
+    import anvil.calsync as calsync
+
+    def boom(day, days=7):
+        raise OSError("calendar.db kaputt")
+
+    monkeypatch.setattr(calsync, "workload", boom)
+    conn = fitness.open_db()
+    try:
+        ctx = fitness.build_day_context(conn, date.today())
+    finally:
+        conn.close()
+    assert "Externe Last" not in ctx and "Datenlage" in ctx
