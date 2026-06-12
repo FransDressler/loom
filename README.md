@@ -175,6 +175,41 @@ standalone core of hermes-agent's cron (MIT), heavily slimmed:
   blocks one worker cycle (capped by `ANVIL_JOBS_MAX_TURNS`); known DST caveat:
   `daily` slots can drift ±1 h twice a year (covered by grace).
 
+### Kalender (anvil-cal)
+
+`ANVIL_CALENDAR=1` reads Google Calendar (REST v3, OAuth like Strava/Oura — see
+`docs/calendar.md`, **publish the GCP consent screen BEFORE authorizing** or
+refresh tokens die after 7 days) and iCloud calendars read-only via public ICS
+feed URLs (the URL is the secret — env only, redact pattern included). A timer
+syncs an 8-week window into `calendar.db`; `calsync.workload()` turns it into
+the shared workload picture (busy hours, free 30-min blocks, exam countdowns)
+that the coach, the day plan and the chat tools (`calendar_overview`/`events`/
+`freebusy`) all consume. `ANVIL_CALENDAR_WRITE=1` + a dedicated target calendar
+(`ANVIL_CAL_WRITE_ID`) lets ANVIL propose study blocks — every write goes
+through the propose-and-confirm queue, only ever into that calendar, and only
+on events carrying ANVIL's own signature; human events are never touched.
+`anvil-cal --plan-week` / the `calendar_propose_blocks` tool generate the
+proposals on demand.
+
+### Kanban (ops/tasks + Atlas /board)
+
+`ANVIL_KANBAN=1`: tasks are plain vault notes in `ops/tasks/{todo,working,done}/`
+(one `.md` per task, status frontmatter, folder is authoritative, done is never
+deleted) — visible in Obsidian, on the Atlas board at `/board` (native drag &
+drop, live SSE updates), and in the chat via `task_add`/`task_list`/`task_move`.
+The day plan pulls `top_tasks()` from the same files.
+
+### Tagesplan (anvil-dayplan)
+
+`ANVIL_DAYPLAN=1`: a morning timer (05:30–10:00) builds ONE executable daily
+schedule from calendar events + free blocks, today's training plan, top kanban
+tasks and the weekly budgets from the profile note (HiWi tally counted from the
+calendar), writes it to `<reports>/<date> Tagesplan.md` as a check-off list and
+pushes a short summary to the chat. It waits for the day's training plan until
+`ANVIL_DAYPLAN_FALLBACK_H`, then plans without it; every source is optional —
+the plan degrades instead of failing. It only ever *proposes* calendar changes
+(those go through the confirm queue).
+
 ## Other entry points
 
 **Messaging inboxes.** One shared listener engine (`anvil.listener`) runs the whole
