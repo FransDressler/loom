@@ -237,6 +237,19 @@ def build_inbox_options(channel: Channel):
         from . import jobs
         extra_tools.append(jobs.JOBS_TOOL)
         mcp_servers["anvil_jobs"] = jobs.build_jobs_server(channel)
+    # Netzwerk-Integrationen (READ-Tools über lokale Caches: Fitness, Kalender):
+    # build_network_servers() liefert nur konfigurierte Integrationen — so landen
+    # »Wie war mein Schlaf?« und »Was steht morgen an?« direkt im Chat. Defensiv
+    # gekapselt: ein Integrations-Fehler darf den Chat-Agenten nie lahmlegen.
+    try:
+        from .mcp import build_network_servers
+        net_servers, net_tools = build_network_servers()
+    except Exception as exc:  # noqa: BLE001 — dann eben ohne die Zusatz-Tools
+        print(f"[listener] Integrations-Tools nicht geladen: {exc}", file=sys.stderr, flush=True)
+        net_servers, net_tools = {}, []
+    if net_servers:
+        mcp_servers.update(net_servers)
+        extra_tools.extend(net_tools)
     if extra_tools:
         options = build_options(config.VAULT_PATH, config.MODEL, extra_tools=extra_tools, mcp_servers=mcp_servers)
     else:

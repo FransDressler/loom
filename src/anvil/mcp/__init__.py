@@ -33,11 +33,16 @@ class Integration:
 
     server: object
     tool_names: list[str] = field(default_factory=list)
+    #: Server-Key im mcp_servers-dict (= Tool-Präfix mcp__<name>__…). None =>
+    #: der Modulname. calendar_tools.py braucht das, weil sein Modul wegen der
+    #: stdlib-Kollision nicht "calendar" heißen darf, die Tools aber
+    #: mcp__calendar__… heißen sollen.
+    name: str | None = None
 
 
 # Module names under anvil.mcp, each exposing build() -> Integration | None.
-# Phase 1+: add "github", "mail", "calendar" here as their modules land.
-_INTEGRATION_MODULES: list[str] = ["fitness"]
+# Phase 1+: add "github", "mail" here as their modules land.
+_INTEGRATION_MODULES: list[str] = ["fitness", "calendar_tools"]
 
 
 def _ok(text: str) -> dict:
@@ -72,6 +77,6 @@ def build_network_servers() -> tuple[dict, list[str]]:
         integration = module.build()
         if integration is None:  # not configured — skip silently
             continue
-        servers[name] = integration.server
+        servers[integration.name or name] = integration.server
         tools.extend(integration.tool_names)
     return servers, tools

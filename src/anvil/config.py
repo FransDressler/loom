@@ -644,3 +644,49 @@ JOBS_MODEL: str | None = os.environ.get("ANVIL_JOBS_MODEL") or None
 JOBS_MAX_TURNS: int = int(os.environ.get("ANVIL_JOBS_MAX_TURNS", "15"))
 # Schutz vor LLM-Amok: harte Obergrenze angelegter Jobs.
 JOBS_MAX_JOBS: int = int(os.environ.get("ANVIL_JOBS_MAX_JOBS", "50"))
+
+
+# --- Kalender: Google Calendar + ICS-Feeds → Workload-Bild (anvil-cal) ----------
+# Phase 1 des Kalender-Plans: ein Timer (`anvil-cal --sync`, anvil-calendar.timer)
+# spiegelt ein 8-Wochen-Fenster aller konfigurierten Quellen in einen lokalen
+# SQLite-Cache (STATE_DIR/calendar.db); calsync.workload() liefert daraus das
+# deterministische Workload-Bild (Termine, belegte Stunden, freie Blöcke,
+# Klausur-Countdowns) für die Chat-Tools, das Atlas-Dashboard und spätere
+# Phasen (Coach, Tagesplan). Master-Schalter, default AUS. Setup: docs/calendar.md.
+CALENDAR: bool = _flag("ANVIL_CALENDAR", "0")
+# Google-OAuth-Client (Typ "Desktopanwendung"). ⚠️ Den Consent-Screen ERST auf
+# "In production" publishen, DANN `anvil-cal --auth google` — im Testing-Modus
+# verfallen Refresh-Tokens nach 7 Tagen (Details + Schrittfolge: docs/calendar.md).
+# Secrets nur in ~/.config/anvil/env, nie im Vault.
+GOOGLE_CLIENT_ID: str = os.environ.get("ANVIL_GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET: str = os.environ.get("ANVIL_GOOGLE_CLIENT_SECRET", "")
+GCAL_API_URL: str = os.environ.get("ANVIL_GCAL_API_URL", "https://www.googleapis.com/calendar/v3")
+GCAL_AUTH_URL: str = os.environ.get("ANVIL_GCAL_AUTH_URL", "https://accounts.google.com/o/oauth2/v2/auth")
+GCAL_TOKEN_URL: str = os.environ.get("ANVIL_GCAL_TOKEN_URL", "https://oauth2.googleapis.com/token")
+GCAL_TIMEOUT: int = int(os.environ.get("ANVIL_GCAL_TIMEOUT", "30"))
+# Welche Google-Kalender gelesen werden (kommaseparierte Kalender-IDs; die IDs
+# listet `anvil-cal --calendars`).
+CAL_GOOGLE_IDS: str = os.environ.get("ANVIL_CAL_GOOGLE_IDS", "primary")
+# ICS-Feeds (z. B. öffentlich freigegebene iCloud-Kalender), kommasepariert als
+# `name=url` (webcal:// oder https://). ⚠️ Diese URLs sind BEARER-GEHEIMNISSE —
+# wer sie kennt, liest den Kalender: nur hier in der env, nie im Vault;
+# redact.py maskiert sie, bevor Text einen Chat-Kanal verlässt.
+CAL_ICS_URLS: str = os.environ.get("ANVIL_CAL_ICS_URLS", "")
+# Sync-Kadenz in Minuten. Der Timer selbst ist in deploy/anvil-calendar.timer
+# verdrahtet; dieser Wert steuert die Staleness-Warnung in workload()
+# (Cache älter als 3×POLL ⇒ Warnung statt stillem Veralten).
+CAL_POLL_MIN: int = int(os.environ.get("ANVIL_CAL_POLL_MIN", "15"))
+# Eigener Port für den einmaligen Google-OAuth-Loopback (anvil-cal --auth google),
+# bewusst getrennt vom Fitness-Port 8723.
+CAL_OAUTH_PORT: int = int(os.environ.get("ANVIL_CAL_OAUTH_PORT", "8724"))
+# Wachfenster für freie Blöcke / belegte Stunden (lokale Stunden, 30-min-Raster).
+CAL_DAY_START: int = int(os.environ.get("ANVIL_CAL_DAY_START", "8"))
+CAL_DAY_END: int = int(os.environ.get("ANVIL_CAL_DAY_END", "22"))
+# Klausur-Erkennung für workload()["exams"]: entweder eine dedizierte Quelle
+# (Kalender-ID bzw. ICS-Feed-Name) ODER — wenn leer — ein Titel-Regex über alle
+# Quellen (case-insensitive Teilstring-Treffer).
+CAL_EXAM_CALENDAR: str = os.environ.get("ANVIL_CAL_EXAM_CALENDAR", "")
+CAL_EXAM_PATTERN: str = os.environ.get("ANVIL_CAL_EXAM_PATTERN", "klausur|prüfung|exam")
+# SQLite-Cache. Liegt in STATE_DIR (NICHT im Vault), damit rohe Kalenderdaten
+# nie als Notizen auftauchen. Leer => STATE_DIR/calendar.db.
+CAL_DB: str = os.environ.get("ANVIL_CAL_DB", "")

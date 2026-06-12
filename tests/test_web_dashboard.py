@@ -28,6 +28,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "INGEST_DIR", str(tmp_path / "dump"))
     monkeypatch.setattr(config, "WEB_TOKEN", "test-token-123")
     monkeypatch.setattr(config, "JOBS", False)  # deterministisch: jobs-Kachel aus
+    monkeypatch.setattr(config, "CALENDAR", False)  # Kalender-Block default aus
+    monkeypatch.setattr(config, "CAL_DB", str(tmp_path / "calendar.db"))
     # Modul-Caches pro Test frisch, sonst lebt ein /api/state-Snapshot 5 s weiter.
     monkeypatch.setattr(web, "_state_cache", {"ts": 0.0, "body": None})
     monkeypatch.setattr(web, "_cpu_sample", None)
@@ -80,9 +82,10 @@ def test_state_shape(client, env):
     data = resp.json()
     assert set(data) == {
         "running", "active_sources", "vault", "integrations",
-        "queues", "sys", "tools_today", "jobs",
+        "queues", "sys", "tools_today", "jobs", "calendar",
     }
     assert data["running"] is True  # Event jünger als 8 s
+    assert data["calendar"] is None  # ANVIL_CALENDAR aus → Kachel ausgeblendet
     assert data["vault"] == {"notes": 1, "links": 2, "tags": 1, "linked_pct": 100.0}
     assert data["queues"] == {"builder": 0, "tasks": 0, "ingest": 0, "confirm": 0}
     assert data["tools_today"] == 1
@@ -134,6 +137,48 @@ def test_state_redacts_secrets(client, monkeypatch):
     assert secret not in resp.text
     assert "REDAKTIERT" in resp.text
     resp.json()  # Redaction darf das JSON nicht zerbrechen
+
+
+def test_state_calendar_block_survives_redaction(client, env, monkeypatch):
+    """Der calendar-Block erscheint mit Flag+Cache — und normale Termin-Titel
+    dürfen NICHT als [REDAKTIERT:…] im Dashboard ankommen."""
+    from datetime import date, datetime, timedelta
+
+    from anvil import calsync
+
+    monkeypatch.setattr(config, "CALENDAR", True)
+    today = date.today()
+    soon = (datetime.now() + timedelta(minutes=5)).replace(microsecond=0)
+    conn = calsync.open_db()
+    conn.execute(
+        'INSERT INTO events (source, uid, calendar, title, start, "end", all_day, '
+        "location, status, anvil_owned, updated, raw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("ics:uni", "e1", "uni", "Zahnarzt Dr. Müller — Kontrolle",
+         soon.isoformat(), (soon + timedelta(hours=1)).isoformat(),
+         0, "", "confirmed", 0, "", "{}"),
+    )
+    conn.execute(
+        'INSERT INTO events (source, uid, calendar, title, start, "end", all_day, '
+        "location, status, anvil_owned, updated, raw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("ics:uni", "e2", "uni", "MW-Klausur",
+         f"{(today + timedelta(days=10)).isoformat()}T09:00:00",
+         f"{(today + timedelta(days=10)).isoformat()}T11:00:00",
+         0, "", "confirmed", 0, "", "{}"),
+    )
+    conn.execute("INSERT OR REPLACE INTO sync_state VALUES (?, ?)",
+                 ("last_sync/ics:uni", datetime.now().isoformat(timespec="seconds")))
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/api/state")
+    assert resp.status_code == 200
+    cal = resp.json()["calendar"]
+    assert set(cal) == {"today_events", "next", "busy_hours_today", "exams_soon"}
+    assert cal["today_events"] >= 1
+    # Termine kommen unverstümmelt durch die zentrale Redaction:
+    assert cal["next"]["title"] == "Zahnarzt Dr. Müller — Kontrolle"
+    assert cal["exams_soon"][0]["title"] == "MW-Klausur"
+    assert "REDAKTIERT" not in json.dumps(cal, ensure_ascii=False)
 
 
 # --- /api/events (SSE) ---------------------------------------------------------------

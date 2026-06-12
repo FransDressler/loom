@@ -414,6 +414,19 @@ def _jobs_snapshot() -> dict | None:
     return {"count": len(jobs), "next_run_at": due[0] if due else None}
 
 
+def _calendar_snapshot() -> dict | None:
+    """Kompakter Kalender-Block — nur wenn ANVIL_CALENDAR an ist UND der
+    Sync-Cache existiert, sonst None (das Frontend blendet die Kachel aus).
+    Inhalt: {today_events, next: {title,start}|None, busy_hours_today, exams_soon}.
+    Der Lazy-Import hält den sqlite-/calsync-Pfad aus jedem Snapshot heraus,
+    solange das Feature aus ist."""
+    if not getattr(config, "CALENDAR", False):
+        return None
+    from . import calsync
+
+    return calsync.web_snapshot()
+
+
 def _build_state() -> dict:
     """Den kompletten Snapshot bauen (läuft in einem Thread, nie im Event-Loop)."""
     digest = _events_digest()
@@ -437,6 +450,7 @@ def _build_state() -> dict:
         },
         "tools_today": digest["tools_today"],
         "jobs": _jobs_snapshot(),
+        "calendar": _calendar_snapshot(),
     }
 
 

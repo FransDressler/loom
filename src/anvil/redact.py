@@ -103,6 +103,16 @@ _URL_CRED_RE = re.compile(r"([a-z][a-z0-9+.-]*://[^/\s:@]+:)([^/\s@]+)(@)", re.I
 # (wie _PREFIX_RE), damit "…eyJfoo"-Substrings längerer Wörter nicht matchen.
 _JWT_RE = re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_=-]{4,}){0,2}")
 
+# ICS-Kalender-Feed-URLs (ANVIL_CAL_ICS_URLS) sind BEARER-Geheimnisse: wer die
+# URL kennt, liest den ganzen Kalender. Trifft webcal://-Links, iCloud-Published-
+# Pfade (…caldav.icloud.com/published/<token>) und jede *.ics-URL; maskiert wird
+# nur der Pfad-Teil — Schema+Host bleiben zur Wiedererkennung stehen.
+_ICS_URL_RE = re.compile(
+    r"((?:webcal|https?)://[^/\s\"'<>]+)"                       # Schema + Host (bleibt)
+    r"((?:/[^\s\"'<>]*)?(?:/published/|\.ics)[^\s\"'<>]*)",     # Pfad mit Feed-Kennung (maskiert)
+    re.IGNORECASE,
+)
+
 
 def _mask(token: str) -> str:
     """Token maskieren; lange behalten 6/4 Randzeichen zur Wiedererkennung."""
@@ -145,4 +155,5 @@ def redact_text(text: str, *, env=None) -> str:
     text = _PRIVATE_KEY_RE.sub("[REDAKTIERT: PRIVATE KEY]", text)
     text = _URL_CRED_RE.sub(lambda m: f"{m.group(1)}***{m.group(3)}", text)
     text = _JWT_RE.sub(lambda m: _mask(m.group(0)), text)
+    text = _ICS_URL_RE.sub(lambda m: f"{m.group(1)}/[REDAKTIERT:ICS-PFAD]", text)
     return text

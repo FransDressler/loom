@@ -39,20 +39,14 @@ import argparse
 import asyncio
 import json
 import os
-import secrets
-import select
 import sqlite3
 import sys
-import threading
 import time
-import webbrowser
 from datetime import date, datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
-from . import config, events, oura, strava
+from . import config, events, oauth_cli, oura, strava
 
 # Detail+streams cost 2 read requests per activity against a 100-reads/15-min
 # default limit; a long backfill is worked down across timer runs instead of
@@ -76,8 +70,12 @@ class FitnessError(Exception):
 
 # --- token persistence (atomic — refresh tokens are single-use) ------------------
 
-def _token_path(service: str) -> Path:
+def token_path(service: str) -> Path:
+    """Öffentlicher Pfad der Token-Datei eines Dienstes (auch calsync nutzt das)."""
     return Path(config.STATE_DIR) / f"fitness_{service}_tokens.json"
+
+
+_token_path = token_path  # interner Alias, historische Aufrufer
 
 
 def _write_private(path: Path, text: str) -> None:
@@ -1065,58 +1063,8 @@ def status_text() -> str:
 
 
 # --- one-time OAuth bootstrap ---------------------------------------------------------
-
-def _wait_for_code(port: int, expected_state: str | None, timeout_s: int = 300) -> str:
-    """Catch ?code=… on a one-shot localhost listener, with paste-the-URL fallback."""
-    result: dict = {}
-    got = threading.Event()
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler API
-            query = parse_qs(urlparse(self.path).query)
-            code = (query.get("code") or [""])[0]
-            state = (query.get("state") or [""])[0]
-            ok = bool(code) and (expected_state is None or state == expected_state)
-            self.send_response(200 if ok else 400)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(
-                ("✅ ANVIL Fitness: Autorisierung erhalten — dieses Fenster kann zu." if ok
-                 else "⚠️ Kein gültiger Code/State.").encode()
-            )
-            if ok:
-                result["code"] = code
-                got.set()
-
-        def log_message(self, *args):  # silence the default request logging
-            pass
-
-    try:
-        server = HTTPServer(("127.0.0.1", port), Handler)
-    except OSError as exc:
-        raise FitnessError(f"Port {port} belegt (ANVIL_FITNESS_OAUTH_PORT): {exc}") from exc
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-
-    print("Oder die komplette Redirect-URL (http://localhost:…?code=…) hier einfügen und Enter:")
-    deadline = time.time() + timeout_s
-    try:
-        while not got.is_set() and time.time() < deadline:
-            ready, _, _ = select.select([sys.stdin], [], [], 0.5)
-            if ready:
-                line = sys.stdin.readline().strip()
-                if not line:
-                    continue
-                query = parse_qs(urlparse(line).query)
-                code = (query.get("code") or [line])[0]  # a bare code is accepted too
-                if code:
-                    result["code"] = code
-                    break
-    finally:
-        server.shutdown()
-    if not result.get("code"):
-        raise FitnessError("Keine Autorisierung erhalten (Timeout).")
-    return result["code"]
-
+# Die Loopback-Maschinerie (One-Shot-Listener, CSRF-Nonce, Paste-the-URL-Fallback)
+# lebt jetzt geteilt in oauth_cli.py — anvil-cal nutzt denselben Roundtrip.
 
 def run_auth(service: str) -> int:
     mod = {"oura": oura, "strava": strava}[service]
@@ -1127,19 +1075,21 @@ def run_auth(service: str) -> int:
             file=sys.stderr,
         )
         return 1
-    redirect = f"http://localhost:{config.FITNESS_OAUTH_PORT}/callback"
-    state = secrets.token_urlsafe(16)  # CSRF nonce — both services round-trip it
     if service == "oura":
-        url = oura.authorize_url(redirect, state)
+        build_url, exchange = oura.authorize_url, oura.exchange_code
     else:
-        url = strava.authorize_url(redirect, state)
-    print(f"Im Browser autorisieren:\n\n  {url}\n")
+        # Strava braucht die redirect_uri beim Tausch nicht — Signatur angleichen.
+        build_url = strava.authorize_url
+        exchange = lambda code, redirect: strava.exchange_code(code)  # noqa: E731
     try:
-        webbrowser.open(url)
-    except Exception:  # noqa: BLE001 — headless box; the printed URL is the real path
-        pass
-    code = _wait_for_code(config.FITNESS_OAUTH_PORT, state)
-    tokens = oura.exchange_code(code, redirect) if service == "oura" else strava.exchange_code(code)
+        tokens = oauth_cli.run_loopback_auth(
+            build_url, exchange,
+            port=config.FITNESS_OAUTH_PORT, port_env="ANVIL_FITNESS_OAUTH_PORT",
+            app_label="ANVIL Fitness",
+        )
+    except oauth_cli.OAuthFlowError as exc:
+        # Fehlerklasse des Moduls beibehalten (Verhalten wie vor der Extraktion).
+        raise FitnessError(str(exc)) from exc
     save_tokens(service, tokens)
 
     who = ""
