@@ -79,15 +79,12 @@ def test_context_includes_available_sources(env, monkeypatch):
         "warnings": [],
     })
 
-    class _FakeKanban:
-        @staticmethod
-        def top_tasks(n):
-            return [{"title": "Übungsblatt 7", "due": iso, "priority": 1,
-                     "effort": "90m", "file": "ops/tasks/todo/uebungsblatt-7.md"}]
+    import anvil.kanban as kanban
 
-    import sys as _sys
-
-    monkeypatch.setitem(_sys.modules, "anvil.kanban", _FakeKanban())
+    monkeypatch.setattr(kanban, "top_tasks", lambda n: [
+        {"title": "Übungsblatt 7", "due": iso, "priority": 1,
+         "effort": "90m", "file": "ops/tasks/todo/uebungsblatt-7.md"},
+    ])
 
     note = env / fitness.plan_note_rel(today)
     note.parent.mkdir(parents=True, exist_ok=True)
