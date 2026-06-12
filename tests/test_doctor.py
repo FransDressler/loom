@@ -55,9 +55,9 @@ def fresh(tmp_path, monkeypatch):
 # 1. Tabellen-Integrität ----------------------------------------------------------
 
 def test_feature_table_integrity():
-    assert len(doctor.FEATURES) == 23
+    assert len(doctor.FEATURES) == 26
     names = [f.name for f in doctor.FEATURES]
-    assert len(set(names)) == 23
+    assert len(set(names)) == 26
     for f in doctor.FEATURES:
         for flag in f.flags:
             assert flag.startswith("ANVIL_")

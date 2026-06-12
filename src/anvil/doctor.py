@@ -393,6 +393,54 @@ def _jobs_configured() -> tuple[bool, str]:
     return True, "noch keine Jobs (STATE_DIR/jobs wird bei Bedarf angelegt)"
 
 
+def _calendar_configured() -> tuple[bool, str]:
+    """Google-Tokens und/oder ICS-Feeds vorhanden? Plus Sync-Frische aus calendar.db."""
+    from . import fitness
+
+    bits: list[str] = []
+    has_google = fitness.token_path("google").exists()
+    ics_n = len([u for u in getattr(config, "CAL_ICS_URLS", "").split(",") if "=" in u])
+    if has_google:
+        bits.append("Google autorisiert")
+    if ics_n:
+        bits.append(f"{ics_n} ICS-Feed(s)")
+    if not bits:
+        return False, "weder Google-Tokens (anvil-cal --auth google) noch ANVIL_CAL_ICS_URLS"
+    db = Path(getattr(config, "CAL_DB", "") or (Path(config.STATE_DIR) / "calendar.db"))
+    if db.exists():
+        age_h = (time.time() - db.stat().st_mtime) / 3600
+        poll_min = getattr(config, "CAL_POLL_MIN", 15)
+        if age_h * 60 > 3 * poll_min:
+            bits.append(f"⚠ letzter Sync vor {age_h:.1f} h (Timer aktiv?)")
+        else:
+            bits.append(f"Sync vor {age_h * 60:.0f} min")
+    else:
+        bits.append("noch nie gesynct (anvil-cal --sync)")
+    if getattr(config, "CALENDAR_WRITE", False) and not getattr(config, "CAL_WRITE_ID", ""):
+        return False, " · ".join(bits) + " · CALENDAR_WRITE an, aber CAL_WRITE_ID leer"
+    return True, " · ".join(bits)
+
+
+def _kanban_configured() -> tuple[bool, str]:
+    root = Path(config.VAULT_PATH) / getattr(config, "KANBAN_DIR", "ops/tasks")
+    if not root.is_dir():
+        return True, f"{root.name}/ wird beim ersten Task angelegt"
+    counts = {s: len(list((root / s).glob("*.md"))) for s in ("todo", "working", "done")
+              if (root / s).is_dir()}
+    if not counts:
+        return True, "Ordner leer (todo/working/done fehlen noch)"
+    return True, " · ".join(f"{s} {n}" for s, n in counts.items())
+
+
+def _dayplan_configured() -> tuple[bool, str]:
+    try:
+        state = json.loads((Path(config.STATE_DIR) / "dayplan.json").read_text())
+        last = state.get("last_day")
+    except (OSError, json.JSONDecodeError):
+        last = None
+    return True, f"zuletzt geplant: {last or 'noch nie'}"
+
+
 FEATURES: tuple[Feature, ...] = (
     Feature("core", (), lambda: True, _core_configured),
     Feature("imessage", ("ANVIL_BB_REPLY",),
@@ -463,6 +511,12 @@ FEATURES: tuple[Feature, ...] = (
     Feature("code-sessions/full-agent", ("ANVIL_CODE_SESSIONS", "ANVIL_FULL_AGENT"),
             lambda: bool(config.CODE_SESSIONS or config.FULL_AGENT), _code_configured),
     Feature("jobs", ("ANVIL_JOBS",), lambda: bool(getattr(config, "JOBS", False)), _jobs_configured),
+    Feature("calendar", ("ANVIL_CALENDAR", "ANVIL_CALENDAR_WRITE"),
+            lambda: bool(getattr(config, "CALENDAR", False)), _calendar_configured),
+    Feature("kanban", ("ANVIL_KANBAN",),
+            lambda: bool(getattr(config, "KANBAN", False)), _kanban_configured),
+    Feature("dayplan", ("ANVIL_DAYPLAN",),
+            lambda: bool(getattr(config, "DAYPLAN", False)), _dayplan_configured),
 )
 
 
