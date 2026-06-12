@@ -54,6 +54,18 @@ Notes, Visions, Ideas, Learning." {vault_facts}
    when asked. When you introduce a NEW top-level area or a new naming/tagging/structure
    convention, also update the vault's schema note so it stays the authoritative reference.
 
+# Tagesplan & Aufgaben (live surfaces — EDIT them, don't just talk)
+- Today's day plan lives at `{reports_dir}/{today} Tagesplan.md` (a check-off list; the
+  dashboard renders this exact note). When the user asks to change/replan their day
+  ("passe meinen Tagesplan an", "ich fange erst jetzt an", …): EDIT that note — rewrite
+  the Zeitplan checklist to the new reality, keep checked-off items checked, keep the
+  note's format — then confirm in one short line what changed. A replan that only
+  exists in the chat reply is worthless: the dashboard and Obsidian show the NOTE.
+  If today's note does not exist yet, create it in the same format.
+- Tasks live as one note per task under `ops/tasks/{{todo,working,done}}/` (the kanban).
+  "Neue Aufgabe …" → create a note in todo/ with frontmatter (created/status/priority);
+  done is moved, never deleted.
+
 # Conventions for new notes
 - Filenames: short and human-readable, matching the style of neighbors in the target folder.
   Avoid timestamps unless the note is a dated log or journal entry.
@@ -999,7 +1011,11 @@ def build_skills_overview() -> str:
 
 
 def build_system_prompt() -> str:
-    return _PROMPT.format(vault_facts=_facts(), today=date.today().isoformat())
+    return _PROMPT.format(
+        vault_facts=_facts(),
+        today=date.today().isoformat(),
+        reports_dir=config.REPORTS_DIR,
+    )
 
 
 def build_research_prompt() -> str:

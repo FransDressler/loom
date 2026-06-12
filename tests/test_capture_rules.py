@@ -78,3 +78,18 @@ def test_facts_carry_compact_capture_heuristic(vault, state_dir, monkeypatch):
     assert "Frust" in facts
     assert "Defekt-Claims" in facts
     assert "transiente Fehler" in facts
+
+
+def test_system_prompt_teaches_dayplan_editing(monkeypatch):
+    """»Tagesplan anpassen« muss die NOTIZ editieren, nicht im Chat umplanen —
+    der Chat-Agent braucht dafür Pfad + Auftrag im System-Prompt."""
+    from datetime import date
+
+    from anvil import config
+    from anvil.prompt import build_system_prompt
+
+    monkeypatch.setattr(config, "REPORTS_DIR", "ops/reports")
+    text = build_system_prompt()
+    assert f"ops/reports/{date.today().isoformat()} Tagesplan.md" in text
+    assert "EDIT that note" in text
+    assert "ops/tasks/" in text  # Kanban-Konvention für "neue Aufgabe …"

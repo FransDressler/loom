@@ -100,10 +100,14 @@
   // listening = Mic aktiv (lokal); working = state.running ODER SSE-Event jünger 8s; sonst idle.
   function computeState() {
     if (S.micActive) return 'listening';
-    // Der Server-running-Flag verfällt mit dem Alter seines Snapshots — sonst hinge
-    // der Working→Idle-Rückfall am 10-s-Poll und fühlte sich zäh an.
+    // Eigener Chat-Lauf in Flight: working hart halten — lange LLM-Generierungen
+    // liefern minutenlang keine Events, der Timer darf dabei NICHT neu starten.
+    if (S.webRunActive) return 'working';
+    // Server-running verfällt mit dem Snapshot-Alter — aber das Fenster muss
+    // GRÖSSER sein als das Poll-Intervall (10s), sonst flackert working→idle in
+    // der Lücke und die RUNNING-Uhr springt auf 0 (gemeldeter Bug).
     var serverFresh = S.server && S.server.running &&
-      (Date.now() - (S.serverAt || 0) < 8000);
+      (Date.now() - (S.serverAt || 0) < 15000);
     var running = serverFresh || (Date.now() - S.lastEventTs < 8000);
     return running ? 'working' : 'idle';
   }
@@ -755,6 +759,8 @@
     addStreamRow({ ts: new Date().toISOString(), kind: 'user', text: text, source: 'web' }, false);
     input.value = '';
     sendBtn.disabled = true;
+    S.webRunActive = true;
+    applyState();   // sofort working, Uhr startet jetzt — und hält bis zum Stream-Ende
 
     var row = addStreamRow({ ts: new Date().toISOString(), kind: 'reply', text: '', source: 'web' }, true);
     var txtEl = row.querySelector('.ev-text');
@@ -793,6 +799,7 @@
       cursor.remove();
       setLastAnswer(acc, text);
     }).finally(function () {
+      S.webRunActive = false;
       sendBtn.disabled = false;
       input.focus();
     });
