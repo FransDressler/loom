@@ -710,3 +710,15 @@ body.login-page { align-items: center; justify-content: center; }
   display: flex; flex-direction: column; }
 .board-frame { flex: 1; width: 100%; border: 0; border-radius: 0 0 14px 14px;
   background: var(--base); }
+
+/* --- Letzte Antwort, gepinnt in der Idle-Karte ------------------------------------- */
+.ambient-answer { display: flex; flex-direction: column; gap: 5px; margin: 12px 0 4px;
+  padding: 12px 14px; background: color-mix(in srgb, var(--mantle) 60%, transparent);
+  border: 1px solid var(--surface1); border-radius: 10px; }
+.ambient-answer[hidden] { display: none; }
+.ambient-answer-hdr { font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 1.8px; color: var(--mauve); }
+.ambient-answer-q { font-family: var(--font-mono); font-size: 10px;
+  color: var(--overlay1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ambient-answer-text { font-size: 13px; color: #CBD5E1; line-height: 1.55;
+  white-space: pre-wrap; overflow-y: auto; max-height: 34vh; overscroll-behavior: contain; }

@@ -780,14 +780,36 @@
     }).then(function () {
       if (!acc) txtEl.textContent = '(no reply)';
       cursor.remove();
+      setLastAnswer(acc, text);
     }).catch(function (err) {
       txtEl.textContent = acc || ('error: ' + err.message);
       cursor.remove();
+      setLastAnswer(acc, text);
     }).finally(function () {
       sendBtn.disabled = false;
       input.focus();
     });
   }
+
+  // ---- Letzte Antwort in der Idle-Karte pinnen --------------------------------------
+  // Der Live-Stream ist (artboard-treu) nur in working/listening sichtbar — ohne
+  // das Pinning verschwände die Chat-Antwort ~10s nach dem Lauf mit dem Idle-Fall.
+  function setLastAnswer(answer, question) {
+    answer = (answer || '').trim();
+    var box = $('ambientAnswer');
+    if (!answer) { box.hidden = true; return; }
+    try {
+      sessionStorage.setItem('atlasLastAnswer', JSON.stringify(
+        { q: question || '', a: answer }));
+    } catch (e) { /* Storage voll/aus — Pinning lebt dann nur bis zum Reload */ }
+    $('ambientAnswerQ').textContent = question ? '» ' + question : '';
+    $('ambientAnswerText').textContent = answer;
+    box.hidden = false;
+  }
+  try {
+    var saved = JSON.parse(sessionStorage.getItem('atlasLastAnswer') || 'null');
+    if (saved && saved.a) setLastAnswer(saved.a, saved.q);
+  } catch (e) { /* kaputter Storage-Eintrag — einfach ohne starten */ }
 
   sendBtn.addEventListener('click', function () { sendMessage(input.value); });
   input.addEventListener('keydown', function (e) {
