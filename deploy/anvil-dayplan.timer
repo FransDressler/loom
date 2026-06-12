@@ -1,0 +1,12 @@
+[Unit]
+Description=ANVIL Tagesplan alle 30 min am Morgen (plant 1x/Tag, wartet auf den Trainingsplan)
+
+[Timer]
+# 05:30-10:00: der Lauf ist idempotent (1x/Tag-Gate); er wartet auf die
+# Trainingsplan-Notiz des Tages und plant ab DAYPLAN_FALLBACK_H auch ohne sie.
+OnCalendar=*-*-* 05..09:00,30:00
+OnCalendar=*-*-* 10:00:00
+AccuracySec=2min
+
+[Install]
+WantedBy=timers.target

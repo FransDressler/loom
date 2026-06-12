@@ -690,3 +690,37 @@ CAL_EXAM_PATTERN: str = os.environ.get("ANVIL_CAL_EXAM_PATTERN", "klausur|prüfu
 # SQLite-Cache. Liegt in STATE_DIR (NICHT im Vault), damit rohe Kalenderdaten
 # nie als Notizen auftauchen. Leer => STATE_DIR/calendar.db.
 CAL_DB: str = os.environ.get("ANVIL_CAL_DB", "")
+
+# --- Kalender schreiben (Phase 2): Lernblöcke via Propose-and-Confirm ------------
+# ANVIL schreibt AUSSCHLIESSLICH in den dedizierten Google-Kalender unten und nur
+# Events mit eigener Signatur (extendedProperties.private.anvil="1") — menschliche
+# Termine werden nie angefasst. Jede Änderung läuft über die confirm-Queue.
+CALENDAR_WRITE: bool = _flag("ANVIL_CALENDAR_WRITE", "0")
+# Ziel-Kalender-ID (anlegen: Google Kalender "ANVIL Lernplan", ID via anvil-cal
+# --calendars). Leer => Schreiben verweigert, auch bei gesetztem Flag.
+CAL_WRITE_ID: str = os.environ.get("ANVIL_CAL_WRITE_ID", "")
+
+# --- Kanban (Phase 3): Aufgaben als Vault-Notizen + Atlas-Board -------------------
+# Quelle der Wahrheit ist der Vault: ops/tasks/{todo,working,done}/ — eine .md je
+# Aufgabe (status-Frontmatter; der Ordner ist autoritativ). Das Atlas-Board und
+# die Chat-Tools (task_add/task_list/task_move) lesen/verschieben dieselben Dateien.
+KANBAN: bool = _flag("ANVIL_KANBAN", "0")
+KANBAN_DIR: str = os.environ.get("ANVIL_KANBAN_DIR", "ops/tasks")
+
+# --- Tagesplan (Phase 5): der morgendliche, abarbeitbare Schedule -----------------
+# Ein Timer-Lauf (deploy/anvil-dayplan.timer, 05:30-10:00 alle 30 min) erzeugt 1x
+# täglich eine Tagesplan-Notiz unter <REPORTS_DIR>/ aus Kalender + Trainingsplan +
+# Kanban-Top-Tasks + Budgets und pusht eine Kurzfassung in den Chat. Default AUS.
+DAYPLAN: bool = _flag("ANVIL_DAYPLAN", "0")
+# Ab dieser Stunde wird geplant, auch wenn der Trainingsplan des Tages noch fehlt.
+DAYPLAN_FALLBACK_H: int = int(os.environ.get("ANVIL_DAYPLAN_FALLBACK_H", "9"))
+# Frühestens ab dieser Stunde überhaupt planen.
+DAYPLAN_FROM_H: int = int(os.environ.get("ANVIL_DAYPLAN_FROM_H", "5"))
+# Zustellkanal der Kurzfassung; leer => NOTIFY_CHANNEL. "off" = keine Zustellung.
+DAYPLAN_CHANNEL: str = os.environ.get("ANVIL_DAYPLAN_CHANNEL", "").strip().lower()
+DAYPLAN_MAX_TURNS: int = int(os.environ.get("ANVIL_DAYPLAN_MAX_TURNS", "20"))
+DAYPLAN_MODEL: str | None = os.environ.get("ANVIL_DAYPLAN_MODEL") or None
+# HiWi-Ist-Stunden: Events aus diesem Kalender (Name) ODER — wenn leer — Titel-
+# Muster über alle Quellen. Das Wochen-BUDGET steht als Fakt in der Profil-Notiz.
+CAL_HIWI_CALENDAR: str = os.environ.get("ANVIL_CAL_HIWI_CALENDAR", "")
+CAL_HIWI_PATTERN: str = os.environ.get("ANVIL_CAL_HIWI_PATTERN", "hiwi")
