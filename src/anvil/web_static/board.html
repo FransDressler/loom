@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATLAS — kanban board</title>
+<!-- Geist via fontsource-CDN; Fallback-Stack (system-ui / ui-monospace) hält die Seite offline benutzbar -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/css/geist@latest/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/css/geist-mono@latest/index.css">
+<link rel="stylesheet" href="/static/atlas.css">
+<link rel="stylesheet" href="/static/board.css">
+</head>
+<body class="board-page" data-state="idle">
+
+<!-- Icon-Sprite: inline-SVG (lucide-Pfade), keine Icon-Font-Dependency -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-logo" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></symbol>
+  </defs>
+</svg>
+
+<!-- Hintergrund: Grid + Glow (gleiche Atlas-Optik wie das Dashboard) -->
+<div class="bg" aria-hidden="true">
+  <div class="bg-grid"></div>
+  <div class="bg-glow"></div>
+</div>
+
+<!-- Header 72px: Brand · Add-Feld · Status + Link zurück zum Dashboard -->
+<header class="header">
+  <div class="brand">
+    <div class="logo-tile"><svg class="ic"><use href="#i-logo"/></svg></div>
+    <div class="brand-col">
+      <span class="brand-name">ATLAS</span>
+      <span class="brand-sub">kanban board</span>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <form class="board-add" id="addForm">
+    <svg class="ic"><use href="#i-plus"/></svg>
+    <input class="board-add-input" id="addInput" type="text"
+           placeholder="Neue Aufgabe…" autocomplete="off" maxlength="200">
+    <button class="board-add-btn" type="submit">ADD</button>
+  </form>
+  <div class="spacer"></div>
+  <div class="hdr-actions">
+    <span class="board-status" id="boardStatus">connecting…</span>
+    <a class="hdr-btn" href="/" title="Zurück zum Dashboard"><svg class="ic"><use href="#i-home"/></svg></a>
+  </div>
+</header>
+
+<!-- Drei Spalten; der Ordner im Vault ist die Quelle der Wahrheit -->
+<main class="boardrow">
+  <section class="panel board-col">
+    <div class="sec-header">
+      <div class="sec-header-l"><span class="dot dot-yellow"></span><span class="sec-label">TODO</span></div>
+      <span class="badge muted" id="count-todo">0</span>
+    </div>
+    <div class="card-list" id="col-todo" data-status="todo"></div>
+  </section>
+  <section class="panel board-col">
+    <div class="sec-header">
+      <div class="sec-header-l"><span class="dot dot-mauve"></span><span class="sec-label">WORKING</span></div>
+      <span class="badge" id="count-working">0</span>
+    </div>
+    <div class="card-list" id="col-working" data-status="working"></div>
+  </section>
+  <section class="panel board-col">
+    <div class="sec-header">
+      <div class="sec-header-l"><span class="dot dot-green"></span><span class="sec-label">DONE · ARCHIV</span></div>
+      <span class="badge teal" id="count-done">0</span>
+    </div>
+    <div class="card-list" id="col-done" data-status="done"></div>
+  </section>
+</main>
+
+<script src="/static/board.js"></script>
+</body>
+</html>

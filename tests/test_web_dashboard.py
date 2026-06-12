@@ -30,6 +30,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "JOBS", False)  # deterministisch: jobs-Kachel aus
     monkeypatch.setattr(config, "CALENDAR", False)  # Kalender-Block default aus
     monkeypatch.setattr(config, "CAL_DB", str(tmp_path / "calendar.db"))
+    monkeypatch.setattr(config, "KANBAN", False)  # Board default aus (Flag-Gate-Tests)
+    monkeypatch.setattr(config, "KANBAN_DIR", "ops/tasks")
     # Modul-Caches pro Test frisch, sonst lebt ein /api/state-Snapshot 5 s weiter.
     monkeypatch.setattr(web, "_state_cache", {"ts": 0.0, "body": None})
     monkeypatch.setattr(web, "_cpu_sample", None)
@@ -343,3 +345,109 @@ def test_login_roundtrip(env):
     good = c.post("/login", data={"token": "test-token-123"})
     assert good.status_code == 303
     assert config.WEB_COOKIE in good.cookies
+
+
+# --- /board (Kanban, ANVIL_KANBAN) -----------------------------------------------------
+
+@pytest.fixture
+def board(env, monkeypatch):
+    """env + eingeschaltetes Kanban-Flag; liefert das tmp-Wurzelverzeichnis."""
+    monkeypatch.setattr(config, "KANBAN", True)
+    return env
+
+
+def test_board_404_when_flag_off(client):
+    # env-Fixture lässt KANBAN aus: das Feature existiert dann auch authentifiziert nicht.
+    assert client.get("/board").status_code == 404
+    assert client.get("/api/board").status_code == 404
+    assert client.post("/api/board/add", json={"title": "x"}).status_code == 404
+    assert client.post("/api/board/move", json={"file": "todo/x.md", "to": "done"}).status_code == 404
+
+
+def test_board_requires_auth(board, anon):
+    assert anon.get("/api/board").status_code == 401
+    assert anon.post("/api/board/add", json={"title": "x"}).status_code == 401
+    assert anon.post("/api/board/move", json={"file": "todo/x.md", "to": "done"}).status_code == 401
+    # Seite selbst: Login-Muster wie die Homepage, nie das Board ohne Cookie.
+    r = anon.get("/board")
+    assert r.status_code == 200
+    assert "Token" in r.text and "board.js" not in r.text
+
+
+def test_board_page_with_auth(board, client):
+    r = client.get("/board")
+    assert r.status_code == 200
+    assert "board.js" in r.text and "kanban" in r.text.lower()
+
+
+def test_api_board_is_fresh_and_grouped(board, client, env):
+    from anvil import kanban
+
+    rel = kanban.create_task("Übungsblatt 7", due="2026-06-20", priority=1)
+    data = client.get("/api/board").json()
+    assert set(data) == {"todo", "working", "done"}
+    assert [t["title"] for t in data["todo"]] == ["Übungsblatt 7"]
+    assert data["todo"][0]["rel_path"] == rel
+    assert data["working"] == [] and data["done"] == []
+
+    # Frischer Read, KEIN /api/state-5-s-Cache: eine zweite Aufgabe ist sofort da.
+    kanban.create_task("Direkt sichtbar")
+    titles = {t["title"] for t in client.get("/api/board").json()["todo"]}
+    assert titles == {"Übungsblatt 7", "Direkt sichtbar"}
+
+
+def test_api_board_titles_survive_unredacted(board, client, monkeypatch):
+    """Eigene Aufgaben-Titel dürfen nicht als [REDAKTIERT:…] enden — /api/board
+    läuft bewusst NICHT durch die globale /api/state-Redaction."""
+    from anvil import kanban
+
+    secret_like = "supergeheim-aufgabe-9876xyz"
+    monkeypatch.setenv("ANVIL_WEBDASH_TEST_TOKEN2", secret_like)
+    kanban.create_task(f"Notiz zu {secret_like}")
+    body = client.get("/api/board").text
+    assert secret_like in body and "REDAKTIERT" not in body
+
+
+def test_board_add_endpoint(board, client, env):
+    resp = client.post("/api/board/add", json={"title": "Vom Board", "due": "2026-07-01"})
+    assert resp.status_code == 200
+    rel = resp.json()["file"]
+    path = env / "vault" / "ops" / "tasks" / rel
+    assert path.is_file()
+    text = path.read_text()
+    assert "due: 2026-07-01" in text and "source: board" in text
+
+    assert client.post("/api/board/add", json={"title": "  "}).status_code == 400
+    assert client.post("/api/board/add", content=b"kein json").status_code == 400
+
+
+def test_board_move_endpoint_and_event(board, client, env):
+    from anvil import kanban
+
+    rel = kanban.create_task("Verschieb mich")
+    resp = client.post("/api/board/move", json={"file": rel, "to": "working"})
+    assert resp.status_code == 200
+    new_rel = resp.json()["file"]
+    assert new_rel.startswith("working/")
+    base = env / "vault" / "ops" / "tasks"
+    assert not (base / rel).exists()
+    assert (base / new_rel).is_file()
+    assert "status: working" in (base / new_rel).read_text()
+
+    # Live-Update: der Move liegt als kanban-Event auf dem SSE-Feed.
+    evs, _ = events.read_since(0)
+    kanban_evs = [e for e in evs if e["kind"] == "kanban"]
+    assert kanban_evs and kanban_evs[-1]["source"] == "board"
+    assert "»Verschieb mich« → working" in kanban_evs[-1]["text"]
+
+    assert client.post("/api/board/move", json={"file": new_rel, "to": "quark"}).status_code == 400
+    assert client.post("/api/board/move", json={"file": "todo/fehlt.md", "to": "done"}).status_code == 404
+    assert client.post("/api/board/move", content=b"kein json").status_code == 400
+
+
+def test_board_move_blocks_traversal(board, client, env):
+    (env / "ausserhalb.md").write_text("---\nstatus: todo\n---\n# Beute")
+    for bad in ("../../ausserhalb.md", "todo/../../ausserhalb.md", "/etc/passwd", "todo/.punkt.md"):
+        resp = client.post("/api/board/move", json={"file": bad, "to": "done"})
+        assert resp.status_code == 400, bad
+    assert (env / "ausserhalb.md").is_file()  # nichts außerhalb wurde angefasst

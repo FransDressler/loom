@@ -42,7 +42,7 @@ class Integration:
 
 # Module names under anvil.mcp, each exposing build() -> Integration | None.
 # Phase 1+: add "github", "mail" here as their modules land.
-_INTEGRATION_MODULES: list[str] = ["fitness", "calendar_tools"]
+_INTEGRATION_MODULES: list[str] = ["fitness", "calendar_tools", "kanban_tools"]
 
 
 def _ok(text: str) -> dict:

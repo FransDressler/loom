@@ -1,10 +1,13 @@
 """Kalender-Integration — READ-Tools über den lokalen calsync-Cache.
 
-Folgt dem anvil.mcp-Integration-Vertrag (Muster: mcp/fitness.py). Alles hier
-ist konstruktiv read-only: die Tools lesen ausschließlich den von
-`anvil-cal --sync` gepflegten SQLite-Cache via calsync.workload() — kein
-Netz, keine Tokens, keine confirm-Queue. Schreibende Kalender-Tools kommen
-erst in Phase 2 (Propose-and-Confirm).
+Folgt dem anvil.mcp-Integration-Vertrag (Muster: mcp/fitness.py). Die drei
+Read-Tools lesen ausschließlich den von `anvil-cal --sync` gepflegten
+SQLite-Cache via calsync.workload() — kein Netz, keine Tokens, keine
+confirm-Queue. Einzige Ausnahme ist das Phase-2-Tool calendar_propose_blocks
+(nur eingehängt, wenn ANVIL_CALENDAR_WRITE + ANVIL_CAL_WRITE_ID gesetzt sind):
+es stößt calsync.run_plan_week an, das Lernblöcke VORSCHLÄGT — die Blöcke
+landen in der Bestätigungs-Queue, geschrieben wird erst nach Bestätigung im
+Chat und ausschließlich vom confirm-Handler.
 
 Das Modul heißt calendar_tools (nicht calendar — stdlib-Kollision!), der
 MCP-Server aber "calendar": der Server-Key bestimmt das Tool-Präfix, deshalb
@@ -26,6 +29,8 @@ TOOL_NAMES = [
     "mcp__calendar__calendar_events",
     "mcp__calendar__calendar_freebusy",
 ]
+# Phase 2 (Propose-and-Confirm) — nur bei aktivem Schreib-Flag im Server.
+WRITE_TOOL_NAMES = ["mcp__calendar__calendar_propose_blocks"]
 
 _NO_CACHE = "Noch kein Kalender-Cache (einmal `anvil-cal --sync` ausführen)."
 
@@ -167,17 +172,50 @@ async def calendar_freebusy(args: dict) -> dict:
     return _ok("\n".join(lines)[:_CHARS_CAP])
 
 
+@tool(
+    "calendar_propose_blocks",
+    "Schlägt konkrete Lernblöcke für die nächsten Tage vor (Klausur-Countdowns + freie "
+    "Blöcke + Profil-Budgets) und legt sie in die Bestätigungs-Queue. Es wird NICHTS "
+    "direkt in den Kalender geschrieben — der Nutzer bestätigt die nummerierte Liste "
+    "per »1 3«/»alle«/»keine«. Nur auf ausdrücklichen Wunsch aufrufen (»plan mir "
+    "Lernblöcke«), nie automatisch.",
+    {
+        "type": "object",
+        "properties": {
+            "days": {"type": "integer", "description": "Planungsfenster in Tagen (Default 7, max 14)."},
+        },
+        "required": [],
+    },
+)
+async def calendar_propose_blocks(args: dict) -> dict:
+    from .. import calsync, config
+
+    if not (config.CALENDAR_WRITE and config.CAL_WRITE_ID.strip()):
+        return _ok("⚠️ Kalender-Schreiben ist aus (ANVIL_CALENDAR_WRITE / "
+                   "ANVIL_CAL_WRITE_ID) — Setup: docs/calendar.md §2.")
+    days = max(1, min(int(args.get("days") or 7), 14))
+    try:
+        out = await calsync.run_plan_week(days=days)
+    except Exception as exc:  # noqa: BLE001 — der Chat-Agent soll den Fehler sehen, nicht sterben
+        return _ok(f"⚠️ Lernblock-Planung fehlgeschlagen: {exc}")
+    return _ok(out[:_CHARS_CAP])
+
+
 def build() -> Integration | None:
     """Die Kalender-Integration — None, solange das Flag aus ist oder weder ein
-    Cache existiert noch eine Quelle konfiguriert ist."""
+    Cache existiert noch eine Quelle konfiguriert ist. Das Schreib-Tool
+    (calendar_propose_blocks) erscheint nur, wenn Phase 2 konfiguriert ist —
+    der Chat-Agent sieht nie ein totes Tool."""
     from .. import calsync, config
 
     if not config.CALENDAR:
         return None
     if not (calsync.db_path().exists() or calsync.has_sources()):
         return None
-    server = create_sdk_mcp_server(
-        "calendar",
-        tools=[calendar_overview, calendar_events, calendar_freebusy],
-    )
-    return Integration(server=server, tool_names=list(TOOL_NAMES), name="calendar")
+    tools = [calendar_overview, calendar_events, calendar_freebusy]
+    names = list(TOOL_NAMES)
+    if config.CALENDAR_WRITE and config.CAL_WRITE_ID.strip():
+        tools.append(calendar_propose_blocks)
+        names += list(WRITE_TOOL_NAMES)
+    server = create_sdk_mcp_server("calendar", tools=tools)
+    return Integration(server=server, tool_names=names, name="calendar")

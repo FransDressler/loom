@@ -82,11 +82,11 @@
 
   var KIND_ICON = {
     user: 'user', text: 'msg', tool: 'term', progress: 'act',
-    log: 'file', task: 'task', reply: 'reply', upload: 'upload'
+    log: 'file', task: 'task', reply: 'reply', upload: 'upload', kanban: 'task'
   };
   var KIND_COLOR = {
     user: '#f5c2e7', text: '#cba6f7', tool: '#74c7ec', progress: '#b4befe',
-    log: '#6c7086', task: '#94e2d5', reply: '#f5c2e7', upload: '#fab387'
+    log: '#6c7086', task: '#94e2d5', reply: '#f5c2e7', upload: '#fab387', kanban: '#94e2d5'
   };
 
   // ---- Uhr (echte Zeit, UTC, sekündlich) --------------------------------------------

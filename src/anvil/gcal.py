@@ -25,8 +25,8 @@ Google-Eigenheiten (angenehmer als Strava/Oura):
 
 Retry-Politik wie oura.py: proaktiver Refresh REFRESH_MARGIN_S vor Ablauf,
 genau EIN Force-Refresh bei 401, einmaliger Retry-After-Backoff bei 429.
-insert/patch/delete_event und freebusy sind für Phase 2 (Schreiben via
-confirm-Queue) vorbereitet und werden in Phase 1 nicht benutzt.
+get/insert/patch/delete_event tragen das Phase-2-Schreiben (Propose-and-Confirm,
+calsync.handle_calendar_event); freebusy bleibt vorbereitet und ungenutzt.
 """
 
 from __future__ import annotations
@@ -56,7 +56,15 @@ SCOPES = (
 
 
 class GcalError(Exception):
-    """Ein Google-Calendar-Request schlug fehl oder der Server ist unerreichbar."""
+    """Ein Google-Calendar-Request schlug fehl oder der Server ist unerreichbar.
+
+    `code` trägt den HTTP-Status (None bei Transport-/Parse-Fehlern), damit
+    Aufrufer wie get_event 404/410 sauber von echten Fehlern trennen können.
+    """
+
+    def __init__(self, message: str, code: int | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 class _HttpError(Exception):
@@ -246,7 +254,8 @@ def _request(tokens: dict, method: str, path: str, *, params: dict | None = None
                 refreshed = True
                 refresh_tokens(tokens, on_refresh)
                 continue
-            raise GcalError(f"{method} {path} -> HTTP {exc.code}: {exc.detail}") from exc
+            raise GcalError(f"{method} {path} -> HTTP {exc.code}: {exc.detail}",
+                            code=exc.code) from exc
 
 
 def _cal_path(cal_id: str) -> str:
@@ -316,7 +325,27 @@ def freebusy(tokens: dict, cal_ids: list[str], time_min: str, time_max: str, *,
     return out if isinstance(out, dict) else {}
 
 
-# --- Schreiben (erst Phase 2 benutzt — Propose-and-Confirm) ---------------------------
+# --- Schreiben (Phase 2 — Propose-and-Confirm) ----------------------------------------
+
+def get_event(tokens: dict, cal_id: str, event_id: str, *,
+              on_refresh: Callable[[dict], None] | None = None) -> dict | None:
+    """Ein einzelnes Event per ID lesen; None bei 404/410 (nie angelegt/entsorgt).
+
+    Der Get-vor-Insert-Baustein der Phase-2-Idempotenz: vor jedem insert mit
+    deterministischer Client-ID wird hier nachgesehen, ob ein früherer —
+    scheinbar fehlgeschlagener — Versuch das Event schon angelegt hat. Gelöschte
+    Events liefert Google als Tombstone (status="cancelled"), nicht als 404.
+    """
+    try:
+        out = _request(tokens, "GET",
+                       f"{_cal_path(cal_id)}/events/{urllib.parse.quote(event_id)}",
+                       on_refresh=on_refresh)
+    except GcalError as exc:
+        if exc.code in (404, 410):
+            return None
+        raise
+    return out if isinstance(out, dict) else None
+
 
 def insert_event(tokens: dict, cal_id: str, event: dict, *,
                  on_refresh: Callable[[dict], None] | None = None) -> dict:

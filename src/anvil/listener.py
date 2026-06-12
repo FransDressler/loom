@@ -27,10 +27,15 @@ from pathlib import Path
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from . import chunking, cleaner, config, confirm, events, inbox, ingest, mathpix, mdconvert, tasks
+from . import calsync, chunking, cleaner, config, confirm, events, inbox, ingest, mathpix, mdconvert, tasks
 from .agent import FULL_AGENT_TOOLS, build_options
 from .paths import PROTECTED_DIRS as _PROTECTED_DIRS
 from .prompt import build_skills_overview
+
+# Kalender-Schreiben (Phase 2): den confirm-Handler für »calendar_event« sicher
+# registrieren, damit dieser Poller bestätigte Kalender-Aktionen ausführen kann
+# (calsync registriert wie cleaner schon beim Import; der Aufruf ist idempotent).
+calsync.register_confirm_handlers()
 
 
 class ChannelError(RuntimeError):

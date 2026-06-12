@@ -168,6 +168,10 @@ def _run(item: dict) -> str:
     try:
         return handler(item.get("payload") or {})
     except Exception as exc:  # noqa: BLE001 — one bad action must not abort the batch
+        import traceback  # lazy: only needed on the failure path
+
+        # The bare exception string is not debuggable; the feed gets the trace.
+        events.publish("log", traceback.format_exc()[:500], source="confirm")
         return f"⚠️ Fehler bei »{item.get('summary', '')}«: {exc}"
 
 

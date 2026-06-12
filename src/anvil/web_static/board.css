@@ -1,0 +1,82 @@
+/* Kanban-Board — zweite Atlas-Seite. Baut auf atlas.css auf (Catppuccin Mocha,
+   Geist, gleiche Panel-/Karten-Sprache wie das Dashboard); hier liegt nur das
+   Board-Spezifische: Spalten, Karten, Drag&Drop-Zustände, Add-Feld. */
+
+.boardrow {
+  position: relative; z-index: 1;
+  flex: 1; min-height: 0;
+  display: flex; gap: 20px;
+  padding: 0 24px 24px;
+}
+.board-col { flex: 1; min-width: 0; gap: 14px; }
+
+.dot-mauve { background: var(--mauve); }
+
+/* Spalteninhalt = Drop-Zone; der gestrichelte Rahmen erscheint nur beim Ziehen */
+.card-list {
+  flex: 1; min-height: 120px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 2px;
+  border: 1px dashed transparent; border-radius: 10px;
+  transition: border-color .2s var(--ease), background-color .2s var(--ease);
+}
+.card-list.dragover { border-color: var(--mauve); background: rgba(203, 166, 247, 0.06); }
+
+/* Karte: gleiche Sprache wie .tool-card/.int-row; Prioritäts-Akzent links */
+.kcard {
+  flex: none;
+  background: rgba(49, 50, 68, 0.5);
+  border: 1px solid var(--surface1);
+  border-left: 3px solid var(--surface2);
+  border-radius: 8px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+  cursor: grab;
+}
+.kcard:active { cursor: grabbing; }
+.kcard.dragging { opacity: .45; }
+.kcard.prio-1 { border-left-color: var(--red); }
+.kcard.prio-2 { border-left-color: var(--yellow); }
+.kcard.prio-3 { border-left-color: var(--overlay0); }
+
+.k-title { font-size: 13px; font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
+.k-meta { display: flex; flex-wrap: wrap; gap: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--overlay0); }
+.k-chip {
+  padding: 1px 6px; border-radius: 6px;
+  background: var(--mantle); border: 1px solid var(--surface1);
+}
+.k-chip.due { color: var(--peach); }
+.k-chip.due.overdue { color: var(--red); border-color: rgba(239, 68, 68, 0.4); }
+.k-chip.project { color: var(--sapphire); }
+
+.board-empty { font-family: var(--font-mono); font-size: 10px; color: var(--overlay0); padding: 8px 4px; }
+
+/* Add-Feld im Header (POST /api/board/add) */
+.board-add {
+  display: flex; align-items: center; gap: 8px;
+  height: 42px; border-radius: 12px; padding: 0 6px 0 12px;
+  background: var(--mantle); border: 1px solid var(--surface1);
+  width: min(480px, 40vw);
+}
+.board-add:focus-within { border-color: var(--mauve); }
+.board-add .ic { width: 14px; height: 14px; color: var(--overlay0); flex: none; }
+.board-add-input {
+  flex: 1; min-width: 0; background: none; border: none; outline: none;
+  font: inherit; font-size: 13px; color: var(--text);
+}
+.board-add-input::placeholder { color: var(--overlay0); }
+.board-add-btn {
+  height: 30px; padding: 0 12px; border-radius: 8px; flex: none;
+  background: linear-gradient(135deg, var(--mauve) 0%, var(--sapphire) 100%);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px;
+  font-weight: 600; color: var(--crust);
+}
+.board-add-btn:hover { filter: brightness(1.1); }
+
+.board-status { font-family: var(--font-mono); font-size: 10px; color: var(--overlay0); }
+.board-status.err { color: var(--red); }
+
+@media (max-width: 1100px) {
+  .boardrow { flex: none; flex-direction: column; }
+  .card-list { max-height: 320px; }
+  .board-add { width: 100%; }
+}

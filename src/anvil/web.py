@@ -40,7 +40,7 @@ from starlette.responses import (
 )
 from starlette.routing import Route
 
-from . import config, doctor, events, redact, tasks, vaultstats
+from . import config, doctor, events, kanban, redact, tasks, vaultstats
 from .agent import build_options, run_stream
 
 # One agent run at a time. The SDK spawns a subprocess that writes into the
@@ -617,13 +617,122 @@ async def upload(request: Request) -> Response:
     return JSONResponse({"ok": True, "name": target.name})
 
 
+# --- /board (Kanban: Vault-Tasks als Drag&Drop-Board, ANVIL_KANBAN) -----------------
+
+# done/ ist Archiv und wächst unbegrenzt — das Board zeigt nur die jüngsten Karten.
+_BOARD_DONE_MAX = 50
+
+
+def _board_enabled() -> bool:
+    return bool(getattr(config, "KANBAN", False))
+
+
+async def board_page(request: Request) -> Response:
+    """Zweite Atlas-Seite: das Kanban-Board. 404 solange ANVIL_KANBAN aus ist;
+    ohne Auth kommt die Login-Seite (gleiches Muster wie homepage)."""
+    if not _board_enabled():
+        return Response("not found", status_code=404)
+    if not _authed(request):
+        login_page = _STATIC_DIR / "login.html"
+        if login_page.is_file():
+            return FileResponse(login_page)
+        return HTMLResponse(_render_login())
+    page = _STATIC_DIR / "board.html"
+    if page.is_file():
+        return FileResponse(page)
+    return HTMLResponse(
+        "<!doctype html><meta charset='utf-8'>"
+        "<title>ANVIL</title><h1>ANVIL</h1>"
+        "<p>Frontend fehlt: src/anvil/web_static/board.html nicht gefunden.</p>",
+        status_code=503,
+    )
+
+
+def _board_payload() -> dict:
+    """Frischer Read über kanban.list_tasks — bewusst OHNE den /api/state-Cache
+    und ohne die globale Redaction: Drag&Drop braucht den Ist-Zustand, und eigene
+    Aufgaben-Titel dürfen nicht als [REDAKTIERT:…] enden (Plan §Phase 3)."""
+    cols: dict[str, list[dict]] = {s: [] for s in kanban.STATUSES}
+    for task in kanban.list_tasks():
+        cols[task.status].append(kanban.as_dict(task))
+    cols["done"] = sorted(cols["done"], key=lambda t: t["created"], reverse=True)[:_BOARD_DONE_MAX]
+    return cols
+
+
+async def board_state(request: Request) -> Response:
+    if not _board_enabled():
+        return Response("not found", status_code=404)
+    if not _authed(request):
+        return _unauthorized()
+    payload = await asyncio.to_thread(_board_payload)
+    return JSONResponse(payload)
+
+
+async def board_add(request: Request) -> Response:
+    """POST {title, due?, priority?, project?, effort?} → kanban.create_task."""
+    if not _board_enabled():
+        return Response("not found", status_code=404)
+    if not _authed(request):
+        return _unauthorized()
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return Response("bad request", status_code=400)
+    title = str(payload.get("title", "")).strip()
+    if not title:
+        return Response("bad request: title fehlt", status_code=400)
+    kwargs: dict = {}
+    for key in ("due", "project", "effort"):
+        value = str(payload.get(key, "") or "").strip()
+        if value:
+            kwargs[key] = value
+    if payload.get("priority") is not None:
+        kwargs["priority"] = payload["priority"]  # create_task normalisiert (int|Default)
+    try:
+        rel = await asyncio.to_thread(lambda: kanban.create_task(title, source="board", **kwargs))
+    except (ValueError, OSError) as exc:
+        return Response(f"bad request: {exc}", status_code=400)
+    events.publish("kanban", f"Neue Aufgabe »{title}«", source="board")
+    return JSONResponse({"ok": True, "file": rel})
+
+
+async def board_move(request: Request) -> Response:
+    """POST {file, to} → kanban.move_task. `file` ist strikt relativ innerhalb des
+    Kanban-Ordners (Traversal wird in kanban._resolve abgewehrt → 400)."""
+    if not _board_enabled():
+        return Response("not found", status_code=404)
+    if not _authed(request):
+        return _unauthorized()
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return Response("bad request", status_code=400)
+    file_rel = str(payload.get("file", "")).strip()
+    to = str(payload.get("to", "")).strip().lower()
+    if to not in kanban.STATUSES:
+        return Response(f"bad request: to muss {'|'.join(kanban.STATUSES)} sein", status_code=400)
+    try:
+        task = await asyncio.to_thread(kanban.move_task, file_rel, to)
+    except FileNotFoundError:
+        return Response("not found", status_code=404)
+    except (ValueError, OSError) as exc:
+        return Response(f"bad request: {exc}", status_code=400)
+    # Live-Update gratis: das Board (und jede andere Atlas-Seite) hört den SSE-Feed.
+    events.publish("kanban", f"»{task.title}« → {to}", source="board")
+    return JSONResponse({"ok": True, "file": task.rel_path})
+
+
 app = Starlette(
     routes=[
         Route("/", homepage),
+        Route("/board", board_page),
         Route("/login", login, methods=["POST"]),
         Route("/logout", logout, methods=["POST"]),
         Route("/api/events", events_stream),
         Route("/api/state", state),
+        Route("/api/board", board_state),
+        Route("/api/board/add", board_add, methods=["POST"]),
+        Route("/api/board/move", board_move, methods=["POST"]),
         Route("/api/ask", ask, methods=["POST"]),
         Route("/api/chat", chat, methods=["POST"]),
         Route("/api/upload", upload, methods=["POST"]),

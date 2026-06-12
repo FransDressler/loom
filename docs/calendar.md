@@ -133,6 +133,77 @@ autorisiert oder ein ICS-Feed konfiguriert).
 - **Atlas:** `/api/state` enthält einen `calendar`-Block
   (`{today_events, next, busy_hours_today, exams_soon}`), sobald Flag + Cache
   existieren; Termine durchlaufen die Redaction unverstümmelt.
-- **Spätere Phasen** (Coach-Workload, Lernblock-Vorschläge, Tagesplan) bauen
-  auf `calsync.workload()` auf; `gcal.insert/patch/delete_event` + `freebusy`
-  liegen für Phase 2 bereit, werden aber noch nirgends aufgerufen.
+- **Spätere Phasen** (Coach-Workload, Tagesplan) bauen auf
+  `calsync.workload()` auf; das Schreiben (Lernblöcke) ist Teil 2 unten.
+
+---
+
+# Teil 2 — Schreiben via Propose-and-Confirm (`ANVIL_CALENDAR_WRITE`)
+
+ANVIL schreibt **ausschließlich** in einen dedizierten Google-Kalender
+(„ANVIL Lernplan“) und **ausschließlich nach Bestätigung im Chat** — jede
+Aktion läuft über die Bestätigungs-Queue (`confirm.py`), genau wie die
+Lösch-Vorschläge des Cleaners. iCloud bleibt read-only; der Lernplan-Kalender
+ist über das Google-Konto auf dem iPhone sichtbar.
+
+## 5. Schreib-Kalender anlegen + einschalten
+
+1. Im Google-Konto (Web oder App) einen **neuen Kalender „ANVIL Lernplan“**
+   anlegen — nie den primären Kalender als Ziel verwenden.
+2. Die ID des neuen Kalenders holen und eintragen:
+
+   ```sh
+   anvil-cal --calendars          # listet IDs (…@group.calendar.google.com)
+   # in ~/.config/anvil/env:
+   ANVIL_CALENDAR_WRITE=1
+   ANVIL_CAL_WRITE_ID=…@group.calendar.google.com
+   ```
+
+   **Beide** müssen gesetzt sein — fehlt eines, verweigert der Handler jede
+   Aktion, auch eine bereits bestätigte. Der Phase-1-OAuth-Scope
+   (`calendar.events`) deckt das Schreiben bereits ab; keine neue
+   Autorisierung nötig.
+
+## 6. Bestätigungs-Workflow (Lernblöcke on demand — keine Automatik)
+
+```sh
+anvil-cal --plan-week            # oder im Chat: „plan mir Lernblöcke für die Woche“
+```
+
+Beides startet **einen** Agent-Lauf (`calsync.run_plan_week`, im Chat das
+MCP-Tool `calendar_propose_blocks`): er liest Klausur-Countdowns + freie
+Blöcke aus `workload()` und die Budgets aus der Profil-Notiz und erzeugt
+konkrete Blöcke. Der Lauf **schlägt nur vor** — die Blöcke landen als
+nummerierte Liste in der Bestätigungs-Queue und werden in den Chat getextet.
+Jede Zeile trägt das Präfix `[Kalender]` + Datum, damit sie auch in einer
+gemischten Liste (z. B. neben Cleaner-Vorschlägen) lesbar bleibt:
+
+```
+📋 ANVIL — 3 Aktion(en) zur Bestätigung:
+1. [Kalender] Lernblock Di 17.6. 14–16 — MW-Klausur
+2. [Kalender] Lernblock Mi 18.6. 9–11 — MW-Klausur
+3. …
+Antworte mit Nummern (z.B. »1 3«), »alle« oder »keine«.
+```
+
+Antwort `1 3` / `alle` / `keine` im Chat führt aus bzw. verwirft.
+
+> ⏱ **TTL vs. Poll-Latenz:** Ein Vorschlag bleibt
+> `ANVIL_CONFIRM_PENDING_TTL_H` Stunden (Default 48) beantwortbar, danach
+> verfällt er still. Die Antwort wird erst vom **nächsten Poll** des Kanals
+> verarbeitet — die Ausführung folgt also mit Poll-Latenz, nicht sofort.
+
+## 7. Sicherheitsmodell
+
+- **Nur der eine Kalender:** geschrieben wird ausschließlich in
+  `ANVIL_CAL_WRITE_ID`; alle anderen Kalender sind für Writes tabu.
+- **Eigene-Events-Signatur:** jedes ANVIL-Event trägt
+  `extendedProperties.private.anvil="1"`. `update`/`delete` verweigern HART
+  alles ohne diese Signatur — ANVIL fasst nie menschliche Termine an, auch
+  nicht im eigenen Schreib-Kalender.
+- **Idempotenz statt .trash:** ein bestätigter, aber scheinbar fehlgeschlagener
+  Write ist nicht vault-recoverable — deshalb deterministische Client-Event-IDs
+  (base32hex aus SHA-256 von Titel+Start) plus Get-vor-Insert: ein Retry nach
+  Timeout trifft dasselbe Event und kann nie doppeln. Ein versehentlich
+  gelöschter Block ist über denselben Vorschlag (gleicher Titel+Start ⇒
+  gleiche ID) verlustfrei wieder anlegbar.
