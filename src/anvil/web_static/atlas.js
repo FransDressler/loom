@@ -248,6 +248,7 @@
     // (ein Server-source wie "x · user" könnte title-Sniffing spoofen).
     row.dataset.kind = ev.kind || '';
     row.dataset.source = ev.source || '';
+    row.dataset.ts = String(evEpoch(ev));
     if (ev.source) row.title = ev.source + ' · ' + (ev.kind || '');
     return row;
   }
@@ -539,18 +540,24 @@
 
   // ---- CURRENT TASK --------------------------------------------------------------------------
   function renderTask() {
-    // Titel: jüngstes task-Event, sonst jüngste User-Nachricht des laufenden Laufs.
+    // Titel: jüngstes task-Event DES LAUFENDEN ZYKLUS, sonst jüngste User-Nachricht.
+    // Frische-Schranke ist Pflicht: ohne sie zeigte die Karte bei jedem Working-
+    // Eintritt den letzten task-Titel aus dem Backlog (z.B. den Morgen-Tagesplan)
+    // mit neu startender Uhr — als würde dieselbe Task ewig neu beginnen.
+    var cutoff = (S.workingSince || Date.now()) - 15000;
     var title = null, sub = null;
     for (var i = 0; i < S.notifEvents.length; i++) {
-      if (S.notifEvents[i].kind === 'task') { title = S.notifEvents[i].text; break; }
+      var ev = S.notifEvents[i];
+      if (ev.kind === 'task' && evEpoch(ev) >= cutoff) { title = ev.text; break; }
     }
     var rows = streamBody.children;
     for (var j = rows.length - 1; j >= 0 && (!title || !sub); j--) {
-      var kind = (rows[j].dataset && rows[j].dataset.kind) || '';
+      var d = rows[j].dataset || {};
+      if (Number(d.ts || 0) < cutoff) break;   // Zeilen sind chronologisch — ab hier nur Altes
       var tx = rows[j].querySelector('.ev-text');
       if (!tx) continue;
-      if (!title && kind === 'user') title = tx.textContent;
-      if (!sub && (kind === 'progress' || kind === 'log')) sub = tx.textContent;
+      if (!title && d.kind === 'user') title = tx.textContent;
+      if (!sub && (d.kind === 'progress' || d.kind === 'log')) sub = tx.textContent;
     }
     $('taskTitle').textContent = title || 'Agent run in progress';
     $('taskTitle').title = title || '';
