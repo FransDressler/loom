@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATLAS — obsidian intelligence core</title>
+<!-- Geist via fontsource-CDN; Fallback-Stack (system-ui / ui-monospace) hält die Seite offline benutzbar -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/css/geist@latest/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/css/geist-mono@latest/index.css">
+<link rel="stylesheet" href="/static/atlas.css">
+</head>
+<body data-state="idle">
+
+<!-- Icon-Sprite: inline-SVG (lucide-Pfade), keine Icon-Font-Dependency -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-logo" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-term" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-msg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
+    <symbol id="i-reply" viewBox="0 0 24 24"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></symbol>
+    <symbol id="i-act" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/></symbol>
+    <symbol id="i-task" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></symbol>
+    <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+    <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  </defs>
+</svg>
+
+<!-- Hintergrund: Grid + Streaks + Glow -->
+<div class="bg" aria-hidden="true">
+  <div class="bg-grid"></div>
+  <div class="streak streak-a"></div>
+  <div class="streak streak-b"></div>
+  <div class="streak streak-c"></div>
+  <div class="streak streak-d"></div>
+  <div class="bg-glow"></div>
+</div>
+
+<!-- Header 72px -->
+<header class="header">
+  <div class="brand">
+    <div class="logo-tile"><svg class="ic"><use href="#i-logo"/></svg></div>
+    <div class="brand-col">
+      <span class="brand-name">ATLAS</span>
+      <span class="brand-sub">obsidian intelligence core</span>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <div class="state-pill">
+    <div class="mini-orb-wrap"><div class="mini-orb-glow"></div><div class="mini-orb"></div></div>
+    <span class="state-label" id="stateLabel">IDLE</span>
+    <span class="state-div"></span>
+    <span class="state-detail" id="stateDetail">awaiting input</span>
+  </div>
+  <div class="spacer"></div>
+  <div class="hdr-actions">
+    <div class="clock-chip">
+      <svg class="ic"><use href="#i-clock"/></svg>
+      <span class="clock-text" id="clockText">--:--:-- UTC</span>
+    </div>
+    <button class="hdr-btn" id="bellBtn" title="Benachrichtigungen (reply/task)">
+      <svg class="ic"><use href="#i-bell"/></svg>
+      <span class="notif-dot" id="notifDot"></span>
+    </button>
+    <button class="hdr-btn" id="histBtn" title="Event-Historie">
+      <svg class="ic"><use href="#i-history"/></svg>
+    </button>
+    <button class="hdr-btn" id="setBtn" title="Einstellungen / Integrationen">
+      <svg class="ic"><use href="#i-settings"/></svg>
+    </button>
+    <div class="profile-chip">
+      <span class="avatar"></span>
+      <span class="avatar-name">Frans</span>
+    </div>
+  </div>
+</header>
+
+<!-- BodyRow: 300px / flex / 360px -->
+<main class="bodyrow">
+
+  <!-- Links: OBSIDIAN VAULT + INTEGRATIONS -->
+  <aside class="panel panel-left">
+    <div class="sec-header">
+      <div class="sec-header-l">
+        <span class="dot dot-grey" id="vaultDot"></span>
+        <span class="sec-label">OBSIDIAN VAULT</span>
+      </div>
+      <span class="vault-status off" id="vaultStatus">connecting…</span>
+    </div>
+    <div class="stats-grid">
+      <div class="stats-row">
+        <div class="stat-card"><span class="stat-num" id="statNotes">—</span><span class="stat-lbl">NOTES</span></div>
+        <div class="stat-card"><span class="stat-num c-mauve" id="statLinks">—</span><span class="stat-lbl">LINKS</span></div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-card"><span class="stat-num c-pink" id="statTags">—</span><span class="stat-lbl">TAGS</span></div>
+        <div class="stat-card"><span class="stat-num c-sapphire" id="statLinked">—</span><span class="stat-lbl">LINKED %</span></div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="sec-header">
+      <span class="sec-label">INTEGRATIONS</span>
+      <span class="int-count" id="intCount">—</span>
+    </div>
+    <div class="int-list" id="intList"></div>
+  </aside>
+
+  <!-- Mitte: CORE STATE + Orb + Task/Ambient + Live-Stream -->
+  <section class="panel panel-center">
+    <div class="top-status">
+      <span class="core-label">CORE STATE</span>
+      <div class="metrics">
+        <span class="m-cpu" id="mCpu">CPU —</span><span class="sep">·</span>
+        <span class="m-mem" id="mMem">MEM —</span><span class="sep">·</span>
+        <span class="m-lat" id="mLat">LATENCY —</span><span class="sep">·</span>
+        <span class="m-up" id="mUp">UPTIME —</span>
+      </div>
+    </div>
+
+    <div class="orbzone" id="orbzone">
+      <div class="orb-glow"></div>
+      <div class="orb-glow orb-glow-listen"></div>
+      <div class="orb-glow orb-glow-idle"></div>
+      <div class="l-ring l-ring-1"></div>
+      <div class="l-ring l-ring-2"></div>
+      <div class="l-ring l-ring-3"></div>
+      <span class="l-tick l-tick-n"></span><span class="l-tick l-tick-s"></span>
+      <span class="l-tick l-tick-w"></span><span class="l-tick l-tick-e"></span>
+      <div class="w-orbit"></div>
+      <div class="w-pulse"></div>
+      <canvas id="orb"></canvas>
+      <div class="orb-mic"><svg class="ic"><use href="#i-mic"/></svg></div>
+      <div class="orb-label"><span class="dot"></span><span id="orbLabelText">IDLE</span></div>
+    </div>
+
+    <!-- CURRENT TASK (nur Working); Elapsed-Zeit + Indeterminate-Bar statt erfundener % -->
+    <div class="task-card">
+      <div class="task-accent"></div>
+      <div class="task-content">
+        <div class="task-header-row">
+          <span class="task-header">CURRENT TASK</span>
+          <span class="task-elapsed" id="taskElapsed">—</span>
+        </div>
+        <span class="task-title" id="taskTitle">—</span>
+        <span class="task-sub" id="taskSub">—</span>
+        <div class="progress-track"><div class="progress-fill"></div></div>
+      </div>
+    </div>
+
+    <!-- Idle: STANDING BY + Suggestion-Chips (echte Buttons → /api/ask) -->
+    <div class="ambient">
+      <div class="ambient-accent"></div>
+      <div class="ambient-col">
+        <span class="ambient-hdr">STANDING BY</span>
+        <span class="ambient-desc">Atlas is idle. Voice and text input ready.</span>
+        <div class="chips">
+          <button class="chip" data-ask="Summarize today"><span class="dot"></span>Summarize today</button>
+          <button class="chip" data-ask="Plan deep work"><span class="dot"></span>Plan deep work</button>
+          <button class="chip" data-ask="Find note about Q3"><span class="dot"></span>Find note about Q3</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- LIVE STREAM -->
+    <div class="stream">
+      <div class="stream-header">
+        <div class="stream-header-l">
+          <span class="live-dot"></span>
+          <span class="stream-label">LIVE STREAM</span>
+        </div>
+        <span class="stream-count" id="streamCount">0 events · auto-scroll</span>
+      </div>
+      <div class="stream-body" id="streamBody"></div>
+    </div>
+  </section>
+
+  <!-- Rechts: SUB-AGENTS + TOOL CALLS -->
+  <aside class="panel panel-right">
+    <div class="sec-header">
+      <span class="sec-label">SUB-AGENTS</span>
+      <span class="badge" id="agentBadge">0 running</span>
+    </div>
+    <div class="agents-list" id="agentsList"></div>
+    <div class="divider"></div>
+    <div class="sec-header">
+      <span class="sec-label">TOOL CALLS</span>
+      <span class="badge teal" id="toolBadge">— total</span>
+    </div>
+    <div class="tools-list" id="toolsList"></div>
+    <span class="recent-hdr" id="recentHdr" hidden>RECENT</span>
+    <div class="recent-list" id="recentList"></div>
+  </aside>
+</main>
+
+<!-- InputSlot 120px / InputBar 80px -->
+<footer class="inputslot">
+  <div class="inputbar">
+    <button class="mic-btn" id="micBtn" title="Spracheingabe (de-DE)">
+      <span class="mic-ring"></span>
+      <svg class="ic"><use href="#i-mic"/></svg>
+    </button>
+    <div class="waveform" id="waveform"></div>
+    <span class="v-div"></span>
+    <div class="text-col">
+      <span class="text-hint" id="textHint">IDLE · TAP MIC OR TYPE</span>
+      <input class="text-input" id="textInput" type="text" placeholder="Ask Atlas anything…" autocomplete="off">
+    </div>
+    <button class="attach-btn" id="attachBtn" title="Datei in den Ingest-Ordner hochladen">
+      <svg class="ic"><use href="#i-clip"/></svg>
+    </button>
+    <button class="mode-btn" id="modeBtn" title="Deep Think: Eskalation in die Task-Queue">
+      <svg class="ic"><use href="#i-zap"/></svg>
+      <span>DEEP THINK</span>
+    </button>
+    <button class="send-btn" id="sendBtn" title="Senden">
+      <svg class="ic"><use href="#i-send"/></svg>
+    </button>
+  </div>
+</footer>
+
+<!-- Overlays -->
+<div class="overlay" id="histOverlay">
+  <div class="overlay-card">
+    <div class="overlay-head">
+      <span class="overlay-title">EVENT HISTORY · last 1000</span>
+      <button class="overlay-close" data-close="histOverlay"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="overlay-body" id="histBody"><div class="overlay-empty">loading…</div></div>
+  </div>
+</div>
+
+<div class="overlay" id="setOverlay">
+  <div class="overlay-card">
+    <div class="overlay-head">
+      <span class="overlay-title">SETTINGS · INTEGRATIONS</span>
+      <button class="overlay-close" data-close="setOverlay"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="overlay-body" id="setBody"><div class="overlay-empty">loading…</div></div>
+    <div class="overlay-foot">
+      <span class="foot-info" id="setFootInfo"></span>
+      <button class="logout-btn" id="logoutBtn">LOG OUT</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="notifOverlay">
+  <div class="overlay-card">
+    <div class="overlay-head">
+      <span class="overlay-title">NOTIFICATIONS · reply &amp; task</span>
+      <button class="overlay-close" data-close="notifOverlay"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="overlay-body" id="notifBody"></div>
+  </div>
+</div>
+
+<form id="logoutForm" method="post" action="/logout" hidden></form>
+<input type="file" id="fileInput" hidden>
+
+<script src="/static/atlas.js"></script>
+</body>
+</html>

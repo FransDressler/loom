@@ -481,6 +481,27 @@ def _safe_configured(f: Feature) -> tuple[bool, str]:
         return False, f"configured-Check fehlgeschlagen: {exc}"
 
 
+def feature_snapshot() -> list[dict]:
+    """Dashboard-Zeilen pro Feature: {name, enabled, ok, detail}.
+
+    Reine Wiederverwendung der FEATURES-Tabelle über _safe_enabled/_safe_configured
+    — KEINE Netz-Probes, KEINE Subprozesse (das hier läuft im /api/state-Pfad des
+    Webservers). Die Detail-Texte laufen hier bewusst NICHT durch redact: web.py
+    maskiert beim Serialisieren den fertigen JSON-String (ein Redact-Punkt statt
+    zwei halber).
+    """
+    out: list[dict] = []
+    for f in FEATURES:
+        ok, detail = _safe_configured(f)
+        out.append({
+            "name": f.name,
+            "enabled": _safe_enabled(f),
+            "ok": ok,
+            "detail": detail,
+        })
+    return out
+
+
 def _flag_display(flags: tuple[str, ...]) -> str:
     parts = []
     for name in flags:
@@ -488,7 +509,9 @@ def _flag_display(flags: tuple[str, ...]) -> str:
         if isinstance(value, bool):
             parts.append(f"{name}={'an' if value else 'aus'}")
         else:
-            parts.append(f"{name}={value}")
+            # Nie den Rohwert zeigen (konsistent mit _require): auch heute
+            # harmlose Variablen könnten künftig Secrets/Privates tragen.
+            parts.append(f"{name} {'gesetzt' if value else 'leer'}")
     return ", ".join(parts)
 
 

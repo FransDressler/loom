@@ -22,7 +22,7 @@ from pathlib import Path
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from . import config, redact
+from . import config, events, redact
 
 CODE_TOOL = "mcp__anvil_code__run_code_task"
 
@@ -44,8 +44,19 @@ async def run_code_task(task: str, *, cwd: str | None = None, model: str | None 
     """Run one headless Claude Code task in CODE_DIR and return a chat-ready result.
 
     Returns a short summary + the git diff stat (or an error line). Never raises —
-    the worker posts whatever string comes back.
+    the worker posts whatever string comes back. Start und Ausgang (fertig/Timeout/
+    Fehler) erscheinen als "code"-Events im Live-Feed.
     """
+    with events.scope("code"):
+        events.publish("task", f"Code-Session: {task[:200]}")
+        result = await _run_code_task(task, cwd=cwd, model=model, progress=progress)
+        # Erste Zeile des Ergebnisses = Status (✅ fertig / ⚠️ Timeout / ⚠️ Fehler).
+        first = next((line for line in (result or "").splitlines() if line.strip()), "(kein Ergebnis)")
+        events.publish("task", first)
+        return result
+
+
+async def _run_code_task(task: str, *, cwd: str | None = None, model: str | None = None, progress=None) -> str:
     from .inbox import emit
 
     # The master kill-switch: even a queued "code" task must not run when disabled.
@@ -83,6 +94,12 @@ async def run_code_task(task: str, *, cwd: str | None = None, model: str | None 
     except Exception as exc:  # noqa: BLE001 — surface the launch failure to the chat
         # Exception-Texte können Umgebungsdetails zitieren — auch hier maskieren.
         return redact.redact_text(f"⚠️ Code-Session: Start fehlgeschlagen: {exc}")
+    # PGID sofort nach dem Start merken: beim Timeout könnte claude selbst schon
+    # tot sein (getpgid schlüge fehl), die Kinder der Gruppe aber weiterlaufen.
+    try:
+        pgid = os.getpgid(proc.pid)
+    except OSError:
+        pgid = None
     try:
         out, _ = await asyncio.wait_for(
             proc.communicate(input=task.encode()), timeout=config.CODE_TIMEOUT_S
@@ -90,9 +107,12 @@ async def run_code_task(task: str, *, cwd: str | None = None, model: str | None 
     except asyncio.TimeoutError:
         # Kill the whole process group (claude + any build/test children it spawned),
         # not just the claude process, so nothing is left running with full permissions.
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
+        if pgid is not None:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.kill()
+        else:
             proc.kill()
         await proc.wait()
         return f"⚠️ Code-Session: Timeout nach {config.CODE_TIMEOUT_S}s — abgebrochen."

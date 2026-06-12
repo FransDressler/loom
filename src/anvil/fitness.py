@@ -673,6 +673,9 @@ Coaching-Wissen dahinter. Erzeugt und gepflegt von ANVIL (`anvil-fitness`).
 
 ## Wissen
 {knowledge_links}
+
+Vertiefung im Vault: [[Cycling + Gym mit Skoliose — MOC]] ·
+[[Gesundheit & Training — MOC]]
 """
 
 

@@ -29,7 +29,7 @@ from pathlib import Path
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from . import config
+from . import config, events
 
 TODO, WORKING, DONE = "todo", "working", "done"
 
@@ -271,6 +271,14 @@ async def run_tasks_once(
         rel = str(claimed.relative_to(Path(vault)))
         if verbose:
             print(f"[tasks] running {skill} {argument}".rstrip() + f"  ({claimed.name})", file=sys.stderr, flush=True)
+        # Claim + Abschluss/Fehler auf den Live-Feed; der Skill-Lauf selbst ist
+        # unten als "task:<skill>" gescoped, damit Agent-Events ihm zugeordnet sind.
+        arg_short = (argument[:80] + "…") if len(argument) > 80 else argument
+        events.publish(
+            "task",
+            f"Task {skill}{(': ' + arg_short) if arg_short else ''} geclaimt ({claimed.name})",
+            source="tasks",
+        )
 
         result = ""
         try:
@@ -280,13 +288,15 @@ async def run_tasks_once(
                 # `code` posts its own "läuft…" line via run_code_task; others get a
                 # generic start ack here (argument truncated so a long task fits).
                 if skill != "code":
-                    arg = (f" · {argument[:80]}…" if len(argument) > 80 else f" · {argument}") if argument else ""
+                    arg = f" · {arg_short}" if arg_short else ""
                     await aemit(f"🛠️ {skill}{arg} gestartet…")
-                custom = await _run_skill(skill, argument, vault, model, verbose, progress=progress)
+                with events.scope(f"task:{skill}"):
+                    custom = await _run_skill(skill, argument, vault, model, verbose, progress=progress)
                 result = custom or f"✅ {skill}{(' · ' + argument) if argument else ''} ausgeführt."
         except Exception as exc:  # noqa: BLE001 — a caught error finishes the task (no loop)
             result = f"⚠️ {skill} fehlgeschlagen: {exc}"
             print(f"[tasks] {result} ({rel})", file=sys.stderr, flush=True)
+        events.publish("task", f"Task {skill}: {result[:300]}", source="tasks")
         await aemit(result)
 
         with claimed.open("a", encoding="utf-8") as fh:

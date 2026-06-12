@@ -382,3 +382,66 @@ def test_is_ready_and_status(env, monkeypatch):
     assert fitness.is_ready()
     text = fitness.status_text()
     assert "strava: ✓" in text and "oura: nicht konfiguriert" in text
+
+
+# --- Phase 0: Coach-Prompts existieren und run_plan läuft (gemockter Agent) --------
+
+def test_fitness_prompts_exist_and_carry_anchors(env):
+    """Regression für den ImportError-Blocker: fitness.py:796/897 importieren die
+    beiden Builder — sie müssen existieren und die Kern-Anker tragen."""
+    from anvil.prompt import build_fitness_analyze_prompt, build_fitness_plan_prompt
+
+    plan = build_fitness_plan_prompt()
+    ana = build_fitness_analyze_prompt()
+    assert "Athletenprofil" in plan and "Saisonziel" in plan
+    assert "readiness-steuerung" in plan          # Ampel-Wissen ist Pflichtlektüre
+    assert "training-skoliose" in plan            # Fallback bis Phase 4
+    assert str(config.FITNESS_SUMMARY_MAX_CHARS) in plan
+    assert "Plan vs. Ist" in ana and "Athletenprofil" in ana
+
+
+def test_run_plan_writes_note_with_mocked_agent(env, monkeypatch):
+    import asyncio
+
+    import anvil.agent as agent
+
+    vault = env / "vault"
+    captured = {}
+
+    async def fake_run_capture(text, options):
+        captured["prompt"] = text
+        captured["system"] = options.system_prompt
+        target = vault / fitness.plan_note_rel(date.today())
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("---\ncreated: x\n---\n## Fokus\nRuhetag")
+        return "Fokus: Ruhetag — TSB niedrig."
+
+    monkeypatch.setattr(agent, "run_capture", fake_run_capture)
+    monkeypatch.setattr(config, "FITNESS_CHANNEL", "off")
+
+    summary = asyncio.run(fitness.run_plan(str(vault)))
+    assert summary == "Fokus: Ruhetag — TSB niedrig."
+    assert "Athletenprofil" in captured["system"]           # Coach-Prompt verdrahtet
+    assert "Datenlage" in captured["prompt"]                # Tageskontext kam an
+    assert (vault / fitness.plan_note_rel(date.today())).exists()
+    # Tagesmarker gesetzt → zweiter Lauf desselben Tages ist ein No-op
+    assert asyncio.run(fitness.run_plan(str(vault))) is None
+
+
+def test_run_plan_reports_unwritten_note(env, monkeypatch):
+    """Schreibt der Agent die Notiz nicht, darf der Tag NICHT als geplant gelten."""
+    import asyncio
+
+    import anvil.agent as agent
+
+    vault = env / "vault"
+
+    async def lazy_run_capture(text, options):
+        return "Ich habe nur geredet statt zu schreiben."
+
+    monkeypatch.setattr(agent, "run_capture", lazy_run_capture)
+    monkeypatch.setattr(config, "FITNESS_CHANNEL", "off")
+
+    result = asyncio.run(fitness.run_plan(str(vault)))
+    assert result is not None and "nicht geschrieben" in result
+    assert fitness._load_state().get("last_plan_day") != date.today().isoformat()

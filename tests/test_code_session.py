@@ -117,11 +117,33 @@ def test_run_code_task_times_out_kills_process_group(monkeypatch, tmp_path):
     _patch_run(monkeypatch, tmp_path, proc=proc)
     monkeypatch.setattr(code_session.config, "CODE_TIMEOUT_S", 0)  # immediate timeout
     killed = []
-    # NEVER call the real os.killpg in a test (a bogus pgid could kill real processes).
+    # NEVER call the real os.killpg in a test (a bogus pgid could kill real processes);
+    # getpgid ebenso faken — die Fake-PID 4242 existiert im Testlauf nicht.
+    monkeypatch.setattr(code_session.os, "getpgid", lambda pid: pid)
     monkeypatch.setattr(code_session.os, "killpg", lambda pid, sig: killed.append(pid))
     result = asyncio.run(code_session.run_code_task("läuft ewig"))
     assert "Timeout" in result
     assert killed == [proc.pid]  # the whole process group was killed, not just claude
+
+
+def test_run_code_task_timeout_falls_back_without_pgid(monkeypatch, tmp_path):
+    """Wenn getpgid scheitert (Prozess schon weg), wird proc.kill() benutzt — nie ein
+    killpg auf eine geratene Gruppe."""
+    proc = _FakeProc(hang=True)
+    _patch_run(monkeypatch, tmp_path, proc=proc)
+    monkeypatch.setattr(code_session.config, "CODE_TIMEOUT_S", 0)
+
+    def boom(_pid):
+        raise OSError("no such process")
+
+    monkeypatch.setattr(code_session.os, "getpgid", boom)
+    monkeypatch.setattr(
+        code_session.os, "killpg",
+        lambda pid, sig: (_ for _ in ()).throw(AssertionError("killpg darf hier nicht laufen")),
+    )
+    result = asyncio.run(code_session.run_code_task("läuft ewig"))
+    assert "Timeout" in result
+    assert proc.killed  # Fallback hat den claude-Prozess selbst beendet
 
 
 def test_run_code_task_requires_valid_code_dir(monkeypatch):

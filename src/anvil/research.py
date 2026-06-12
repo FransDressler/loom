@@ -28,7 +28,7 @@ from datetime import date
 
 from claude_agent_sdk import ClaudeAgentOptions, create_sdk_mcp_server, tool
 
-from . import config, figures, mathpix, mdconvert
+from . import config, events, figures, mathpix, mdconvert
 from .agent import run_capture
 from .prompt import (
     DEFAULT_GLOSSARY,
@@ -893,7 +893,7 @@ async def _build_hub(
         _log(f"[deep] Die {len(concepts)} Konzept-Notizen sind aber geschrieben in {folder}/.")
         return
     if summary:
-        print(summary, flush=True)
+        _log(summary)
     _log(f"[deep] Fertig. Wiki-Cluster: {vault.rstrip('/')}/{folder}")
 
 
@@ -1161,7 +1161,7 @@ async def run_schema(vault: str, model: str | None, verbose: bool) -> None:
         _log(f"[schema] Agent-Lauf fehlgeschlagen: {exc}")
         summary = ""
     if summary:
-        print(summary, flush=True)
+        _log(summary)
 
     target = Path(vault) / config.SCHEMA_FILE
     if not target.exists():
@@ -1193,7 +1193,7 @@ async def run_glossary(vault: str, model: str | None, verbose: bool) -> None:
         _log(f"[glossar] Agent-Lauf fehlgeschlagen: {exc}")
         summary = ""
     if summary:
-        print(summary, flush=True)
+        _log(summary)
 
     target = Path(vault) / config.GLOSSARY_FILE
     if not target.exists():
@@ -1399,7 +1399,26 @@ async def run_deep_research(
     Each stage is an independent one-shot agent. Fan-outs run concurrently (capped).
     Stages 1–2 build the raw layer (one note + raw Markdown per source in `raw/`);
     stages 3–5 (in `_integrate_cluster`) fold the sources into a concept wiki.
+    Läuft als "research" gescoped, damit Events des Laufs im Live-Feed zuordenbar
+    sind (der Queue-Pfad über anvil-tasks scoped zusätzlich "task:deep-research").
     """
+    with events.scope("research"):
+        await _run_deep_research(
+            topic, sources, vault, model, verbose,
+            min_sources=min_sources, concurrency=concurrency,
+        )
+
+
+async def _run_deep_research(
+    topic: str,
+    sources: list[str],
+    vault: str,
+    model: str | None,
+    verbose: bool,
+    *,
+    min_sources: int | None = None,
+    concurrency: int | None = None,
+) -> None:
     min_sources = min_sources or config.RESEARCH_DEEP_MIN_SOURCES
     concurrency = max(1, concurrency or config.RESEARCH_DEEP_CONCURRENCY)
     max_sources = max(min_sources, config.RESEARCH_DEEP_MAX_SOURCES)

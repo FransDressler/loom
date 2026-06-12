@@ -27,7 +27,7 @@ from pathlib import Path
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from . import chunking, cleaner, config, confirm, inbox, ingest, mathpix, mdconvert, tasks
+from . import chunking, cleaner, config, confirm, events, inbox, ingest, mathpix, mdconvert, tasks
 from .agent import FULL_AGENT_TOOLS, build_options
 from .paths import PROTECTED_DIRS as _PROTECTED_DIRS
 from .prompt import build_skills_overview
@@ -503,7 +503,11 @@ def _handle_message(channel: Channel, norm: dict, text: str, options, turns: lis
 
     if verbose:
         print(f"capturing: {text[:80]!r}", file=sys.stderr, flush=True)
-    reply = inbox.capture_text(text, options, context=context)
+    # Der Agent-Lauf dieser Chat-Nachricht erscheint im Live-Feed unter
+    # "chat:<dienst>"; die Nutzer-Nachricht selbst geht (gekürzt) voran.
+    with events.scope(f"chat:{channel.name}"):
+        events.publish("user", text[:300])
+        reply = inbox.capture_text(text, options, context=context)
     _reply(channel, reply)
     _remember(turns, [], text, [reply])
     return 1
