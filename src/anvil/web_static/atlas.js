@@ -154,7 +154,9 @@
   // ---- SSE-Client ---------------------------------------------------------------------
   var es = null;
 
-  function sig(ev) { return (ev.ts || '') + '|' + (ev.kind || '') + '|' + (ev.text || ''); }
+  function sig(ev) {
+    return (ev.ts || '') + '|' + (ev.source || '') + '|' + (ev.kind || '') + '|' + (ev.text || '');
+  }
 
   function rememberSig(s) {
     S.seen.add(s);
@@ -212,6 +214,12 @@
     if (S.seen.has(s)) return;     // Backlog-Replay nach Reconnect unterdrücken
     rememberSig(s);
     var ts = evEpoch(ev);
+    if (ev.kind === 'run') {
+      // Lebenszyklus-Marker: start zählt als Aktivität (sofortiger Working-Einstieg
+      // via SSE), ende verlängert nichts; keine Stream-Zeile — das ist Steuersignal.
+      if (ev.text === 'start' && ts > S.lastEventTs) S.lastEventTs = ts;
+      return;
+    }
     // Telemetrie (kind=log, z.B. prompt_built jedes Listener-Polls) zählt nicht
     // als Aktivität — sonst pulste der Orb alle zwei Minuten grundlos auf WORKING.
     if (ev.kind !== 'log' && ts > S.lastEventTs) S.lastEventTs = ts;

@@ -70,6 +70,8 @@ _PROC_START = time.monotonic()
 
 # Quellen zählen als "aktiv", wenn ihr letztes Event jünger ist als das hier.
 _ACTIVE_WINDOW_S = 120.0
+# Sicherheitsdeckel für offene run/start-Marker ohne ende (Prozess hart gestorben).
+_RUN_OPEN_MAX_S = 30 * 60.0
 # "running", wenn der Lock gehalten wird ODER das jüngste Event jünger ist.
 _RUNNING_WINDOW_S = 8.0
 # Agent-Abschlusszeile aus agent._publish: "[N turns, M ms …]".
@@ -329,6 +331,7 @@ def _events_digest() -> dict:
     last_run_ms: int | None = None
     newest_age: float | None = None
     latest: dict[str, dict] = {}
+    open_runs: dict[str, float] = {}  # source -> Alter des offenen run/start
     for ev in evs:
         try:
             ts = datetime.fromisoformat(str(ev.get("ts", "")))
@@ -342,6 +345,16 @@ def _events_digest() -> dict:
             m = _RUN_MS_RE.search(str(ev.get("text", "")))
             if m:
                 last_run_ms = int(m.group(2))
+        if kind == "run":
+            # Lebenszyklus-Marker aus agent._instrumented_query: ein offener Lauf
+            # heißt VERLÄSSLICH »Agent arbeitet«, auch wenn die Generierung gerade
+            # minutenlang keine Nachrichten liefert.
+            src = str(ev.get("source", "")) or "agent"
+            if str(ev.get("text", "")) == "start":
+                open_runs[src] = age
+            else:
+                open_runs.pop(src, None)
+            continue
         # Nur echte Aktivität treibt running/active_sources — Telemetrie (kind=log,
         # z.B. prompt_built bei jedem 2-min-Listener-Poll) würde den Orb sonst
         # grundlos alle zwei Minuten auf WORKING pulsen lassen.
@@ -357,11 +370,15 @@ def _events_digest() -> dict:
         }
     active = [e for e in latest.values() if 0 <= e["age_s"] <= _ACTIVE_WINDOW_S]
     active.sort(key=lambda e: e["age_s"])  # neueste zuerst
+    # Offene Läufe mit Sicherheitsdeckel: ein Prozess, der ohne ende-Marker stirbt
+    # (kill -9), darf das Dashboard nicht ewig auf WORKING halten.
+    run_open = any(0 <= a <= _RUN_OPEN_MAX_S for a in open_runs.values())
     return {
         "active_sources": active,
         "tools_today": tools_today,
         "last_run_ms": last_run_ms,
         "newest_age": newest_age,
+        "run_open": run_open,
     }
 
 
@@ -434,8 +451,10 @@ def _build_state() -> dict:
     """Den kompletten Snapshot bauen (läuft in einem Thread, nie im Event-Loop)."""
     digest = _events_digest()
     newest_age = digest.pop("newest_age")
-    running = _run_lock.locked() or (
-        newest_age is not None and newest_age < _RUNNING_WINDOW_S
+    running = (
+        _run_lock.locked()
+        or digest.pop("run_open")
+        or (newest_age is not None and newest_age < _RUNNING_WINDOW_S)
     )
     used_mb, total_mb = _mem_mb()
     return {
@@ -485,8 +504,9 @@ def _chat_response(message: str) -> StreamingResponse:
                 events.publish("user", message[:500])
                 first = True
                 try:
+                    # Kein eigenes publish("text") mehr: agent._instrumented_query
+                    # spiegelt jede Nachricht (inkl. Tool-Events) zentral in den Feed.
                     async for chunk in run_stream(message, options):
-                        events.publish("text", chunk)
                         yield (chunk if first else "\n" + chunk).encode()
                         first = False
                 except Exception as exc:  # surface agent failures into the chat

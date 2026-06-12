@@ -101,8 +101,25 @@ def _publish(msg: object) -> None:
         events.publish("log", f"[{msg.num_turns} turns, {msg.duration_ms} ms{cost}]")
 
 
+async def _instrumented_query(prompt: str, options: ClaudeAgentOptions):
+    """query() mit Lebenszyklus + Spiegelung auf den Event-Bus.
+
+    Der run/start|ende-Rahmen ist das verlässliche »Agent arbeitet«-Signal fürs
+    Dashboard: lange Generierungen liefern minutenlang keine Nachrichten, und
+    Event-Frische allein ließe den Zustand flackern. Dazwischen wird jede
+    SDK-Nachricht gespiegelt (text/tool/log) — damit sind auch Chat-Läufe
+    (run_capture/run_stream) im Live-Feed sichtbar, nicht nur retrieve & Co."""
+    events.publish("run", "start")
+    try:
+        async for msg in query(prompt=prompt, options=options):
+            _publish(msg)
+            yield msg
+    finally:
+        events.publish("run", "ende")
+
+
 async def run_once(text: str, options: ClaudeAgentOptions, verbose: bool) -> None:
-    async for msg in query(prompt=text, options=options):
+    async for msg in _instrumented_query(text, options):
         _render(msg, verbose)
 
 
@@ -122,7 +139,7 @@ async def run_research(
             "\n\nBeziehe diese vom Nutzer gelieferten Quellen ein und lass sie durch "
             f"das ocr_document-Tool laufen (PDFs/Bilder):\n{listed}"
         )
-    async for msg in query(prompt=prompt, options=options):
+    async for msg in _instrumented_query(prompt, options):
         _render(msg, verbose)
 
 
@@ -133,7 +150,7 @@ async def run_capture(text: str, options: ClaudeAgentOptions) -> str:
     agent's "saved to ..." confirmation rather than streaming output to a TTY.
     """
     parts: list[str] = []
-    async for msg in query(prompt=text, options=options):
+    async for msg in _instrumented_query(text, options):
         if isinstance(msg, AssistantMessage):
             for block in msg.content:
                 if isinstance(block, TextBlock) and block.text.strip():
@@ -148,7 +165,7 @@ async def run_stream(text: str, options: ClaudeAgentOptions) -> AsyncIterator[st
     run_capture this is stateless: each call is an independent capture/recall,
     matching how the iMessage inbox treats each message.
     """
-    async for msg in query(prompt=text, options=options):
+    async for msg in _instrumented_query(text, options):
         if isinstance(msg, AssistantMessage):
             for block in msg.content:
                 if isinstance(block, TextBlock) and block.text.strip():

@@ -235,7 +235,10 @@ def test_ask_chat_streams_and_publishes_events(client, monkeypatch):
 
     evs, _ = events.read_since(0)
     pairs = [(e["kind"], e["source"]) for e in evs]
-    assert ("user", "web") in pairs and ("text", "web") in pairs
+    # Antwort-Text-Events kommen seit der Lebenszyklus-Instrumentierung zentral aus
+    # agent._instrumented_query (hier weggemockt) — der Handler publiziert nur noch
+    # die User-Nachricht selbst.
+    assert ("user", "web") in pairs
     user_ev = next(e for e in evs if e["kind"] == "user")
     assert user_ev["text"] == "hallo atlas"
 
@@ -534,3 +537,37 @@ def test_transcribe_guards(client, anon, env, monkeypatch):
     monkeypatch.setattr(feynman, "transcribe", boom)
     resp = client.post("/api/transcribe", content=b"audio")
     assert resp.status_code == 502 and "ffmpeg fehlt" in resp.json()["error"]
+
+
+# --- run/start|ende-Lebenszyklus: stabiles running ohne Event-Frische-Raterei -------
+
+def test_open_run_holds_running_without_recent_activity(client, env):
+    import anvil.web as web
+
+    with events.scope("task:research"):
+        events.publish("run", "start")
+    web._state_cache["ts"] = 0.0   # 5-s-Cache umgehen — wir wollen frische Snapshots
+    assert client.get("/api/state").json()["running"] is True
+
+    with events.scope("task:research"):
+        events.publish("run", "ende")
+    web._state_cache["ts"] = 0.0
+    assert client.get("/api/state").json()["running"] is False
+
+
+def test_run_capture_publishes_lifecycle(env, monkeypatch):
+    """Jeder Agent-Lauf rahmt sich mit run/start|ende — die Quelle des Signals."""
+    import asyncio
+
+    import anvil.agent as agent
+
+    async def empty_query(prompt, options):
+        if False:  # pragma: no cover — leerer Async-Generator
+            yield None
+
+    monkeypatch.setattr(agent, "query", lambda prompt, options: empty_query(prompt, options))
+    with events.scope("e2e-span"):
+        asyncio.run(agent.run_capture("hallo", object()))
+    evs, _ = events.read_since(0, limit=1000)
+    span = [(e["kind"], e["text"]) for e in evs if e.get("source") == "e2e-span"]
+    assert ("run", "start") in span and ("run", "ende") in span
