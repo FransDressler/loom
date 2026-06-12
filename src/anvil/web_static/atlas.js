@@ -140,8 +140,8 @@
     } else {
       label.textContent = 'IDLE';
       detail.textContent = !S.sseOk ? 'reconnecting…' : 'awaiting input';
-      hint.textContent = 'IDLE · TAP MIC OR TYPE';
-      $('orbLabelText').textContent = 'IDLE';
+      hint.textContent = S.transcribing ? 'TRANSCRIBING …' : 'IDLE · TAP MIC OR TYPE';
+      $('orbLabelText').textContent = S.transcribing ? 'TRANSCRIBING' : 'IDLE';
     }
   }
 
@@ -842,16 +842,22 @@
     for (var i = 0; i < bars.length; i++) bars[i].style.height = REST_H[i] + 'px';
   }
 
-  // ---- Mic / Spracherkennung (webkitSpeechRecognition, de-DE) ----------------------------------------------
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // ---- Mic / Spracheingabe: Aufnahme → /api/transcribe (ANVILs eigene Engine) -----
+  // Bewusst KEIN webkitSpeechRecognition mehr: das war Chrome-only und lief über
+  // Googles Cloud. Jetzt nimmt MediaRecorder auf (jeder Browser, https/localhost)
+  // und der Server transkribiert mit derselben Engine wie WhatsApp-Sprachnotizen
+  // (faster-whisper falls installiert, sonst markitdown — AUDIO_LANG=de-DE).
   var micBtn = $('micBtn');
-  var audioCtx = null, analyser = null, micStream = null, rec = null, micTimer = null;
+  var audioCtx = null, analyser = null, micStream = null, recorder = null, micTimer = null;
+  var recChunks = [];
   var inputBase = '';
+  var micSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia &&
+                        window.MediaRecorder);
 
-  if (!SR) {
+  if (!micSupported) {
     // KEIN toter Button: ohne Browser-Support ausgegraut mit Hinweis
     micBtn.disabled = true;
-    micBtn.title = 'Spracherkennung wird von diesem Browser nicht unterstützt (webkitSpeechRecognition fehlt)';
+    micBtn.title = 'Aufnahme wird hier nicht unterstützt (MediaRecorder fehlt — https oder localhost nötig)';
   } else {
     micBtn.addEventListener('click', function () {
       if (S.micActive) stopListening(); else startListening();
@@ -866,19 +872,18 @@
       analyser.fftSize = 256;
       audioCtx.createMediaStreamSource(stream).connect(analyser);
 
-      rec = new SR();
-      rec.lang = 'de-DE';
-      rec.interimResults = true;
-      rec.continuous = false;
       inputBase = input.value ? input.value + ' ' : '';
-      rec.onresult = function (e) {
-        var txt = '';
-        for (var i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
-        input.value = inputBase + txt;
-      };
-      rec.onend = function () { if (S.micActive) stopListening(); };
-      rec.onerror = function () { if (S.micActive) stopListening(); };
-      rec.start();
+      recChunks = [];
+      var mime = '';
+      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mime = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/mp4')) {
+        mime = 'audio/mp4';   // Safari
+      }
+      recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      recorder.ondataavailable = function (e) { if (e.data && e.data.size) recChunks.push(e.data); };
+      recorder.onstop = onRecordingDone;
+      recorder.start();
 
       S.micActive = true;
       micTimer = setInterval(sampleMic, 60);
@@ -890,15 +895,57 @@
 
   function stopListening() {
     S.micActive = false;
-    if (rec) { try { rec.stop(); } catch (e) { /* schon beendet */ } rec = null; }
     if (micTimer) { clearInterval(micTimer); micTimer = null; }
-    if (micStream) { micStream.getTracks().forEach(function (t) { t.stop(); }); micStream = null; }
     if (audioCtx) { audioCtx.close(); audioCtx = null; analyser = null; }
     S.micDb = null;
     S.micLevel = 0;
     setRestBars();
     applyState();
-    if (input.value.trim()) input.focus();
+    // Tracks erst in onRecordingDone stoppen — recorder.stop() flusht noch Daten.
+    if (recorder && recorder.state !== 'inactive') {
+      try { recorder.stop(); } catch (e) { onRecordingDone(); }
+    } else {
+      onRecordingDone();
+    }
+  }
+
+  function onRecordingDone() {
+    if (micStream) { micStream.getTracks().forEach(function (t) { t.stop(); }); micStream = null; }
+    var rec = recorder; recorder = null;
+    if (!rec || !recChunks.length) return;
+    var blob = new Blob(recChunks, { type: recChunks[0].type || 'audio/webm' });
+    recChunks = [];
+    if (blob.size < 2000) return;   // <~0,1s — nichts Gesagtes, nichts senden
+    S.transcribing = true;
+    micBtn.disabled = true;
+    refreshStateTexts();
+    fetch('/api/transcribe', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': blob.type || 'audio/webm' },
+      body: blob
+    }).then(function (r) {
+      if (r.status === 401) { location.href = '/'; throw new Error('401'); }
+      return r.json().then(function (data) {
+        if (!r.ok) throw new Error(data.error || ('http ' + r.status));
+        return data;
+      });
+    }).then(function (data) {
+      var text = (data.text || '').trim();
+      if (text) {
+        input.value = inputBase + text;
+        input.focus();
+      } else {
+        addStreamRow({ ts: new Date().toISOString(), kind: 'log',
+                       text: 'Transkription: keine Sprache erkannt', source: 'web' }, false);
+      }
+    }).catch(function (err) {
+      addStreamRow({ ts: new Date().toISOString(), kind: 'log',
+                     text: '⚠️ ' + err.message, source: 'web' }, false);
+    }).finally(function () {
+      S.transcribing = false;
+      micBtn.disabled = false;
+      refreshStateTexts();
+    });
   }
 
   function sampleMic() {

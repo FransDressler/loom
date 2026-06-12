@@ -662,6 +662,46 @@ def _board_payload() -> dict:
     return cols
 
 
+# --- Spracheingabe: Browser-Aufnahme → ANVILs eigene Transkriptions-Engine ----------
+# Gleicher Pfad wie WhatsApp-Sprachnotizen/Feynman: faster-whisper falls
+# installiert+aktiviert, sonst markitdown (ffmpeg + Google Web Speech, AUDIO_LANG).
+# Damit funktioniert das Dashboard-Mic in JEDEM Browser — nicht nur in Chrome.
+
+_TRANSCRIBE_MAX_BYTES = 15 * 1024 * 1024
+
+
+def _audio_name(mime: str) -> str:
+    mime = (mime or "").lower()
+    for marker, ext in (("ogg", ".ogg"), ("mp4", ".m4a"), ("mpeg", ".mp3"), ("wav", ".wav")):
+        if marker in mime:
+            return f"aufnahme{ext}"
+    return "aufnahme.webm"  # MediaRecorder-Default (webm/opus)
+
+
+async def transcribe_api(request: Request) -> Response:
+    if not _authed(request):
+        return _unauthorized()
+    try:
+        declared = int(request.headers.get("content-length", "0"))
+    except ValueError:
+        declared = 0
+    if declared > _TRANSCRIBE_MAX_BYTES:
+        return Response("payload too large", status_code=413)
+    data = await request.body()
+    if not data:
+        return Response("bad request: keine Audiodaten", status_code=400)
+    if len(data) > _TRANSCRIBE_MAX_BYTES:
+        return Response("payload too large", status_code=413)
+    mime = request.headers.get("content-type", "audio/webm")
+    from . import feynman
+
+    try:
+        text = await asyncio.to_thread(feynman.transcribe, data, mime, _audio_name(mime))
+    except Exception as exc:  # noqa: BLE001 — Engine-Fehler lesbar an den Browser
+        return JSONResponse({"error": f"Transkription fehlgeschlagen: {exc}"}, status_code=502)
+    return JSONResponse({"text": text})
+
+
 # --- Tagesplan im Dashboard: heutige Plan-Notiz lesen + Checkboxen abhaken ----------
 
 _CHECK_RE = re.compile(r"^(\s*-\s*\[)( |x|X)(\]\s*)(.*)$")
@@ -820,6 +860,7 @@ app = Starlette(
         Route("/api/state", state),
         Route("/api/board", board_state),
         Route("/api/dayplan", dayplan_state),
+        Route("/api/transcribe", transcribe_api, methods=["POST"]),
         Route("/api/dayplan/toggle", dayplan_toggle, methods=["POST"]),
         Route("/api/board/add", board_add, methods=["POST"]),
         Route("/api/board/move", board_move, methods=["POST"]),

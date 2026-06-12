@@ -497,3 +497,40 @@ def test_dayplan_missing_note_and_bad_toggle(client, env):
 def test_dayplan_requires_auth(anon, env):
     assert anon.get("/api/dayplan").status_code == 401
     assert anon.post("/api/dayplan/toggle", json={"index": 0}).status_code == 401
+
+
+# --- Spracheingabe: /api/transcribe (Engine gemockt — kein ffmpeg im Test) ----------
+
+def test_transcribe_roundtrip(client, env, monkeypatch):
+    import anvil.feynman as feynman
+
+    captured = {}
+
+    def fake_transcribe(data, mime, name):
+        captured.update(data=data, mime=mime, name=name)
+        return "Hallo ANVIL, was steht heute an?"
+
+    monkeypatch.setattr(feynman, "transcribe", fake_transcribe)
+    resp = client.post("/api/transcribe", content=b"OggS-fake-audio-bytes",
+                       headers={"Content-Type": "audio/ogg"})
+    assert resp.status_code == 200
+    assert resp.json() == {"text": "Hallo ANVIL, was steht heute an?"}
+    assert captured["mime"] == "audio/ogg" and captured["name"] == "aufnahme.ogg"
+    assert captured["data"] == b"OggS-fake-audio-bytes"
+
+
+def test_transcribe_guards(client, anon, env, monkeypatch):
+    import anvil.feynman as feynman
+
+    assert anon.post("/api/transcribe", content=b"x").status_code == 401
+    assert client.post("/api/transcribe", content=b"").status_code == 400
+    big = client.post("/api/transcribe", content=b"x",
+                      headers={"Content-Length": str(20 * 1024 * 1024)})
+    assert big.status_code == 413
+
+    def boom(data, mime, name):
+        raise RuntimeError("ffmpeg fehlt")
+
+    monkeypatch.setattr(feynman, "transcribe", boom)
+    resp = client.post("/api/transcribe", content=b"audio")
+    assert resp.status_code == 502 and "ffmpeg fehlt" in resp.json()["error"]
