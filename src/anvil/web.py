@@ -51,6 +51,9 @@ _run_lock = asyncio.Lock()
 # der Pfad unabhängig vom CWD des Servers stimmt.
 _STATIC_DIR = Path(__file__).parent / "web_static"
 _STATIC_EXTS = {".html", ".css", ".js", ".svg", ".woff2"}
+# no-cache = speichern erlaubt, aber IMMER revalidieren (ETag/304): das Dashboard
+# wird laufend weiterentwickelt — stale JS im Browser hieße unsichtbare Features.
+_NO_CACHE = {"Cache-Control": "no-cache"}
 
 _SSE_POLL_S = 0.5
 _SSE_HEARTBEAT_S = 15.0
@@ -140,11 +143,11 @@ async def homepage(request: Request) -> Response:
     if not _authed(request):
         login_page = _STATIC_DIR / "login.html"
         if login_page.is_file():
-            return FileResponse(login_page)
+            return FileResponse(login_page, headers=_NO_CACHE)
         return HTMLResponse(_render_login())
     atlas = _STATIC_DIR / "atlas.html"
     if atlas.is_file():
-        return FileResponse(atlas)
+        return FileResponse(atlas, headers=_NO_CACHE)
     # Ehrlicher Hinweis statt einer leeren Seite — das Frontend liegt in
     # web_static/ und wird separat gepflegt.
     return HTMLResponse(
@@ -176,7 +179,7 @@ async def static_file(request: Request) -> Response:
         or not target.is_file()
     ):
         return Response("not found", status_code=404)
-    return FileResponse(target)
+    return FileResponse(target, headers=_NO_CACHE)
 
 
 async def login(request: Request) -> Response:
@@ -635,11 +638,11 @@ async def board_page(request: Request) -> Response:
     if not _authed(request):
         login_page = _STATIC_DIR / "login.html"
         if login_page.is_file():
-            return FileResponse(login_page)
+            return FileResponse(login_page, headers=_NO_CACHE)
         return HTMLResponse(_render_login())
     page = _STATIC_DIR / "board.html"
     if page.is_file():
-        return FileResponse(page)
+        return FileResponse(page, headers=_NO_CACHE)
     return HTMLResponse(
         "<!doctype html><meta charset='utf-8'>"
         "<title>ANVIL</title><h1>ANVIL</h1>"
