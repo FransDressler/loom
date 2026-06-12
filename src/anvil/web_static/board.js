@@ -10,6 +10,12 @@
   var $ = function (id) { return document.getElementById(id); };
   var STATUSES = ['todo', 'working', 'done'];
 
+  // Embed-Modus (?embed=1): das Board läuft als iframe-Overlay im Dashboard —
+  // Brand + Zurück-Link sind dort redundant und werden per CSS ausgeblendet.
+  if (new URLSearchParams(location.search).has('embed')) {
+    document.body.classList.add('embed');
+  }
+
   function setStatus(text, err) {
     var el = $('boardStatus');
     el.textContent = text;

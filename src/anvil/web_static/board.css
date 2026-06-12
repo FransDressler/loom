@@ -80,3 +80,7 @@
   .card-list { max-height: 320px; }
   .board-add { width: 100%; }
 }
+
+/* Embed-Modus: Board als iframe-Overlay im Dashboard — Brand/Zurück-Link weg. */
+.embed .brand { display: none; }
+.embed .header a.hdr-btn[href="/"] { display: none; }

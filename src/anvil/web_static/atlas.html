@@ -33,6 +33,7 @@
     <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/></symbol>
     <symbol id="i-task" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
     <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></symbol>
+    <symbol id="i-board" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><line x1="9" x2="9" y1="3" y2="21"/><line x1="15" x2="15" y1="3" y2="21"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
     <symbol id="i-cal" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></symbol>
     <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
@@ -80,6 +81,9 @@
     <button class="hdr-btn" id="bellBtn" title="Benachrichtigungen (reply/task)">
       <svg class="ic"><use href="#i-bell"/></svg>
       <span class="notif-dot" id="notifDot"></span>
+    </button>
+    <button class="hdr-btn" id="boardBtn" title="Kanban-Board (Overlay)">
+      <svg class="ic"><use href="#i-board"/></svg>
     </button>
     <button class="hdr-btn" id="histBtn" title="Event-Historie">
       <svg class="ic"><use href="#i-history"/></svg>
@@ -193,8 +197,14 @@
     </div>
   </section>
 
-  <!-- Rechts: SUB-AGENTS + TOOL CALLS -->
+  <!-- Rechts: TAGESPLAN + SUB-AGENTS + TOOL CALLS -->
   <aside class="panel panel-right">
+    <div class="sec-header">
+      <span class="sec-label">TAGESPLAN</span>
+      <span class="badge teal" id="planBadge">—</span>
+    </div>
+    <div class="plan-list" id="planList"></div>
+    <div class="divider"></div>
     <div class="sec-header">
       <span class="sec-label">SUB-AGENTS</span>
       <span class="badge" id="agentBadge">0 running</span>
@@ -238,6 +248,17 @@
 </footer>
 
 <!-- Overlays -->
+<div class="overlay" id="boardOverlay">
+  <div class="overlay-card board-overlay-card">
+    <div class="overlay-head">
+      <span class="overlay-title">KANBAN BOARD · ops/tasks</span>
+      <button class="overlay-close" data-close="boardOverlay"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <!-- src wird erst beim Öffnen gesetzt (lazy); ?embed=1 blendet den Board-Header aus -->
+    <iframe class="board-frame" id="boardFrame" title="Kanban-Board" data-src="/board?embed=1"></iframe>
+  </div>
+</div>
+
 <div class="overlay" id="histOverlay">
   <div class="overlay-card">
     <div class="overlay-head">

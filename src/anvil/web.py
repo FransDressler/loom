@@ -659,6 +659,91 @@ def _board_payload() -> dict:
     return cols
 
 
+# --- Tagesplan im Dashboard: heutige Plan-Notiz lesen + Checkboxen abhaken ----------
+
+_CHECK_RE = re.compile(r"^(\s*-\s*\[)( |x|X)(\]\s*)(.*)$")
+
+
+def _dayplan_payload() -> dict:
+    """Die heutige Tagesplan-Notiz als Checkliste fürs Dashboard.
+
+    Liest direkt die Vault-Notiz (Quelle der Wahrheit) — kein eigener State.
+    items-Indizes zählen NUR Checklist-Zeilen, damit toggle stabil adressiert."""
+    from . import dayplan
+
+    rel = dayplan.plan_note_rel(datetime.now().date())
+    note = Path(config.VAULT_PATH) / rel
+    out: dict = {"rel": rel, "exists": note.is_file(), "items": [], "done": 0}
+    if not out["exists"]:
+        return out
+    try:
+        lines = note.read_text(errors="replace").splitlines()
+    except OSError:
+        out["exists"] = False
+        return out
+    for line in lines:
+        m = _CHECK_RE.match(line)
+        if not m:
+            continue
+        done = m.group(2).lower() == "x"
+        out["items"].append({"text": m.group(4).strip(), "done": done})
+        out["done"] += int(done)
+    return out
+
+
+def _dayplan_toggle(index: int) -> bool:
+    """Checkbox `index` (Zählung über Checklist-Zeilen) in der Notiz umschalten."""
+    from . import dayplan
+
+    note = Path(config.VAULT_PATH) / dayplan.plan_note_rel(datetime.now().date())
+    try:
+        lines = note.read_text(errors="replace").splitlines(keepends=True)
+    except OSError:
+        return False
+    seen = -1
+    for i, line in enumerate(lines):
+        m = _CHECK_RE.match(line.rstrip("\n"))
+        if not m:
+            continue
+        seen += 1
+        if seen != index:
+            continue
+        flipped = " " if m.group(2).lower() == "x" else "x"
+        eol = "\n" if line.endswith("\n") else ""
+        lines[i] = f"{m.group(1)}{flipped}{m.group(3)}{m.group(4)}{eol}"
+        tmp = note.with_name(note.name + f".{os.getpid()}.tmp")
+        try:
+            tmp.write_text("".join(lines))
+            tmp.replace(note)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            return False
+        return True
+    return False
+
+
+async def dayplan_state(request: Request) -> Response:
+    if not _authed(request):
+        return _unauthorized()
+    return JSONResponse(await asyncio.to_thread(_dayplan_payload))
+
+
+async def dayplan_toggle(request: Request) -> Response:
+    if not _authed(request):
+        return _unauthorized()
+    try:
+        payload = await request.json()
+        index = int(payload.get("index"))
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return Response("bad request", status_code=400)
+    if index < 0:
+        return Response("bad request", status_code=400)
+    ok = await asyncio.to_thread(_dayplan_toggle, index)
+    if not ok:
+        return Response("not found", status_code=404)
+    return JSONResponse(await asyncio.to_thread(_dayplan_payload))
+
+
 async def board_state(request: Request) -> Response:
     if not _board_enabled():
         return Response("not found", status_code=404)
@@ -731,6 +816,8 @@ app = Starlette(
         Route("/api/events", events_stream),
         Route("/api/state", state),
         Route("/api/board", board_state),
+        Route("/api/dayplan", dayplan_state),
+        Route("/api/dayplan/toggle", dayplan_toggle, methods=["POST"]),
         Route("/api/board/add", board_add, methods=["POST"]),
         Route("/api/board/move", board_move, methods=["POST"]),
         Route("/api/ask", ask, methods=["POST"]),

@@ -655,6 +655,65 @@
 
   $('logoutBtn').addEventListener('click', function () { $('logoutForm').submit(); });
 
+  // ---- Kanban-Overlay (Board als iframe über allem) --------------------------------
+  $('boardBtn').addEventListener('click', function () {
+    var frame = $('boardFrame');
+    if (!frame.src) frame.src = frame.dataset.src;   // lazy: erst beim ersten Öffnen laden
+    $('boardOverlay').classList.add('open');
+  });
+
+  // ---- Tagesplan (Panel rechts oben): echte Notiz, abhakbar -------------------------
+  function renderDayplan(data) {
+    var list = $('planList'), badge = $('planBadge');
+    list.textContent = '';
+    if (!data || !data.exists || !data.items.length) {
+      badge.textContent = '—';
+      var empty = document.createElement('div');
+      empty.className = 'plan-empty';
+      empty.textContent = data && data.exists
+        ? 'Tagesplan ohne Checkliste (' + (data.rel || '') + ')'
+        : 'noch kein Tagesplan heute — kommt morgens automatisch (anvil-dayplan)';
+      list.appendChild(empty);
+      return;
+    }
+    badge.textContent = data.done + '/' + data.items.length;
+    data.items.forEach(function (item, i) {
+      var row = document.createElement('label');
+      row.className = 'plan-item' + (item.done ? ' done' : '');
+      var box = document.createElement('input');
+      box.type = 'checkbox';
+      box.className = 'plan-check';
+      box.checked = item.done;
+      box.addEventListener('change', function () {
+        box.disabled = true;
+        fetch('/api/dayplan/toggle', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ index: i })
+        }).then(function (r) {
+          if (r.status === 401) { location.href = '/'; throw new Error('401'); }
+          if (!r.ok) throw new Error('http ' + r.status);
+          return r.json();
+        }).then(renderDayplan)
+          .catch(function () { box.disabled = false; box.checked = !box.checked; });
+      });
+      var txt = document.createElement('span');
+      txt.className = 'plan-text';
+      txt.textContent = item.text;
+      row.appendChild(box); row.appendChild(txt);
+      list.appendChild(row);
+    });
+  }
+
+  function pollDayplan() {
+    fetch('/api/dayplan', { credentials: 'same-origin' })
+      .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(renderDayplan)
+      .catch(function () { /* Panel behält den letzten Stand; nächster Poll versucht es neu */ });
+  }
+  pollDayplan();
+  setInterval(pollDayplan, 120000);   // die Notiz ändert sich selten — 2 min reichen
+
   // Overlays schließen (Close-Button + Klick auf Backdrop)
   document.querySelectorAll('.overlay-close').forEach(function (btn) {
     btn.addEventListener('click', function () {

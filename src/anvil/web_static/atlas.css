@@ -686,3 +686,27 @@ body.login-page { align-items: center; justify-content: center; }
   font-weight: 600; color: var(--crust);
 }
 .login-btn:hover { filter: brightness(1.1); }
+
+/* --- Tagesplan-Karte (Panel rechts oben) ------------------------------------------ */
+.plan-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto;
+  max-height: 230px; flex-shrink: 0; }
+.plan-item { display: flex; align-items: flex-start; gap: 8px; padding: 4px 6px;
+  border-radius: 6px; cursor: pointer; }
+.plan-item:hover { background: var(--surface0); }
+.plan-check { appearance: none; width: 13px; height: 13px; margin-top: 2px;
+  border: 1px solid var(--overlay0); border-radius: 4px; background: transparent;
+  cursor: pointer; flex-shrink: 0; position: relative; }
+.plan-check:checked { background: var(--teal); border-color: var(--teal); }
+.plan-check:checked::after { content: ''; position: absolute; left: 3.5px; top: 0.5px;
+  width: 3px; height: 7px; border: solid #181825; border-width: 0 2px 2px 0;
+  transform: rotate(45deg); }
+.plan-text { font-size: 11.5px; color: #CBD5E1; line-height: 1.45; }
+.plan-item.done .plan-text { color: var(--overlay1); text-decoration: line-through; }
+.plan-empty { font-family: var(--font-mono); font-size: 10px; color: var(--overlay1);
+  padding: 6px; line-height: 1.6; }
+
+/* --- Kanban-Overlay (Board als iframe über allem) ---------------------------------- */
+.board-overlay-card { width: min(1500px, 96vw); height: min(860px, 92vh);
+  display: flex; flex-direction: column; }
+.board-frame { flex: 1; width: 100%; border: 0; border-radius: 0 0 14px 14px;
+  background: var(--base); }

@@ -451,3 +451,49 @@ def test_board_move_blocks_traversal(board, client, env):
         resp = client.post("/api/board/move", json={"file": bad, "to": "done"})
         assert resp.status_code == 400, bad
     assert (env / "ausserhalb.md").is_file()  # nichts außerhalb wurde angefasst
+
+
+# --- Tagesplan im Dashboard: /api/dayplan + Checkbox-Toggle -------------------------
+
+def _write_plan(env, lines):
+    from anvil import dayplan
+    from datetime import date
+
+    note = env / "vault" / dayplan.plan_note_rel(date.today())
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text("\n".join(lines) + "\n")
+    return note
+
+
+def test_dayplan_state_and_toggle_roundtrip(client, env):
+    note = _write_plan(env, [
+        "---", "created: x", "---", "# Tagesplan",
+        "- [ ] 08:00–10:00 Deep Work",
+        "Zwischentext ohne Checkbox",
+        "- [x] 10:00–10:15 Pause",
+        "- [ ] 15:45 Zone-2-Ride",
+    ])
+    data = client.get("/api/dayplan").json()
+    assert data["exists"] is True and data["done"] == 1
+    assert [i["text"] for i in data["items"]] == [
+        "08:00–10:00 Deep Work", "10:00–10:15 Pause", "15:45 Zone-2-Ride"]
+    # Toggle Index 0 (nur Checklist-Zeilen zählen) → Datei real geändert
+    data2 = client.post("/api/dayplan/toggle", json={"index": 0}).json()
+    assert data2["done"] == 2 and data2["items"][0]["done"] is True
+    assert "- [x] 08:00–10:00 Deep Work" in note.read_text()
+    # Zurück-Toggle stellt den Originalzustand her
+    client.post("/api/dayplan/toggle", json={"index": 0})
+    assert "- [ ] 08:00–10:00 Deep Work" in note.read_text()
+
+
+def test_dayplan_missing_note_and_bad_toggle(client, env):
+    data = client.get("/api/dayplan").json()
+    assert data["exists"] is False and data["items"] == []
+    assert client.post("/api/dayplan/toggle", json={"index": 0}).status_code == 404
+    assert client.post("/api/dayplan/toggle", json={"index": -1}).status_code == 400
+    assert client.post("/api/dayplan/toggle", json={}).status_code == 400
+
+
+def test_dayplan_requires_auth(anon, env):
+    assert anon.get("/api/dayplan").status_code == 401
+    assert anon.post("/api/dayplan/toggle", json={"index": 0}).status_code == 401
