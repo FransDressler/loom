@@ -1,4 +1,4 @@
-"""Tests für das Phase-2-Schreiben (anvil.calsync, ANVIL_CALENDAR_WRITE). Netzfrei.
+"""Tests für das Phase-2-Schreiben (loom.calsync, LOOM_CALENDAR_WRITE). Netzfrei.
 
 gcal wird auf Modulebene gegen einen In-Memory-»Server« gemockt (Muster
 tests/test_calsync.py), der Agent-Lauf des Lernblock-Planers gegen
@@ -20,9 +20,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from anvil import agent, calsync, confirm, config, fitness, gcal
+from loom import agent, calsync, confirm, config, fitness, gcal
 
-_CAL_ID = "anvil-lernplan@group.calendar.google.com"
+_CAL_ID = "loom-lernplan@group.calendar.google.com"
 _WD = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
@@ -142,7 +142,7 @@ def test_create_retry_after_timeout_does_not_duplicate(env, gserver, monkeypatch
 
 def test_update_and_delete_refuse_foreign_events(env, gserver):
     gserver.store["fremd1"] = {"id": "fremd1", "summary": "Zahnarzt",
-                               "status": "confirmed"}  # KEINE anvil-Signatur
+                               "status": "confirmed"}  # KEINE loom-Signatur
     for op in ("update", "delete"):
         result = calsync.handle_calendar_event(
             {"op": op, "event_id": "fremd1", "event": {"title": "Hijack"}})
@@ -181,15 +181,15 @@ def test_write_gates_flag_id_and_tokens(env, gserver, monkeypatch):
     payload = {"op": "create", "event": _block()}
 
     monkeypatch.setattr(config, "CALENDAR_WRITE", False)
-    assert "ANVIL_CALENDAR_WRITE" in calsync.handle_calendar_event(payload)
+    assert "LOOM_CALENDAR_WRITE" in calsync.handle_calendar_event(payload)
     monkeypatch.setattr(config, "CALENDAR_WRITE", True)
 
     monkeypatch.setattr(config, "CAL_WRITE_ID", "")
-    assert "ANVIL_CAL_WRITE_ID" in calsync.handle_calendar_event(payload)
+    assert "LOOM_CAL_WRITE_ID" in calsync.handle_calendar_event(payload)
     monkeypatch.setattr(config, "CAL_WRITE_ID", _CAL_ID)
 
     monkeypatch.setattr(calsync, "load_tokens", lambda service: None)
-    assert "anvil-cal --auth google" in calsync.handle_calendar_event(payload)
+    assert "loom-cal --auth google" in calsync.handle_calendar_event(payload)
     # Kein Gate-Fall hat je das Netz berührt:
     assert gserver.calls == {"get": 0, "insert": 0, "patch": 0, "delete": 0}
 
@@ -301,7 +301,7 @@ def test_run_plan_week_gates_and_garbage_reply(env, monkeypatch):
     monkeypatch.setattr(agent, "run_capture", boom)
     monkeypatch.setattr(config, "CALENDAR_WRITE", False)
     out = asyncio.run(calsync.run_plan_week())
-    assert out.startswith("⚠️") and "ANVIL_CALENDAR_WRITE" in out
+    assert out.startswith("⚠️") and "LOOM_CALENDAR_WRITE" in out
 
     monkeypatch.setattr(config, "CALENDAR_WRITE", True)
 

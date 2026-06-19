@@ -1,4 +1,4 @@
-"""Tests for the generic listener engine (anvil.listener).
+"""Tests for the generic listener engine (loom.listener).
 
 A `FakeChannel` drives `run_poll` so the whole capture pipeline — noise filtering,
 attachment routing, history, replies, cursor — is exercised once, independent of any
@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from anvil import inbox, listener, mdconvert
+from loom import inbox, listener, mdconvert
 
 
 # --- a fake channel ------------------------------------------------------------
@@ -118,7 +118,7 @@ def test_run_poll_unpacks_zip_into_drop_folder(monkeypatch, tmp_path):
     import io
     import zipfile
 
-    from anvil import ingest
+    from loom import ingest
 
     vault = tmp_path / "v"
     vault.mkdir()

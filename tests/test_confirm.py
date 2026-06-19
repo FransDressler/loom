@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from anvil import cleaner, confirm, config
+from loom import cleaner, confirm, config
 
 
 @pytest.fixture

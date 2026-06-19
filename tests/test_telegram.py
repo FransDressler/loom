@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from anvil import inbox, telegram
+from loom import inbox, telegram
 
 TG = telegram.TelegramChannel
 

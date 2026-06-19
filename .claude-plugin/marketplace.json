@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "loom",
+  "description": "Loom — second brain over an Obsidian vault: /loom:* Slash-Commands + gebündelter MCP-Server. Claude-Code-native; über MCP auch von anderen Hosts (z. B. Hermes mit Gemini) nutzbar.",
+  "owner": {
+    "name": "Frans Dressler",
+    "email": "shard.claude@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "loom",
+      "source": "./plugin",
+      "description": "Loom-Features als /loom:* Commands (init, ingest, digest, wiki, retrieve, deep-research, builder, fitness, cleaner, anki) plus der gebündelte MCP-Server (mcp__anvil__*).",
+      "version": "0.1.0",
+      "category": "knowledge"
+    }
+  ]
+}

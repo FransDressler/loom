@@ -48,11 +48,11 @@ werden Mechanismen, Prompts und kleine eigenständige stdlib-Module.
    Silent-Truncation), env-Datei-Drift-Hinweis (CLI lädt `~/.config/anvil/env`
    nicht — nur systemd); `--fix` strikt nicht-destruktiv (mkdir, chmod 600,
    Unit-Kopie, recover_stranded); gesamte Ausgabe durch `redact_text`; auch als
-   MCP-Tool `anvil_status`. doctor crasht nie (Top-Level-Guard → Partial-Report).
+   MCP-Tool `loom_status`. doctor crasht nie (Top-Level-Guard → Partial-Report).
 5. **`anvil-jobs`** (umgesetzt 2026-06-11, `src/anvil/jobs.py`; Port-Kern aus
    `cron/jobs.py` + Delivery-/`[SILENT]`-Semantik aus `cron/scheduler.py`):
    geplante Prompts aus dem Chat via `schedule_job`-Tool (nicht auf Discord —
-   untrusted), `ANVIL_JOBS` default aus. Abweichungen von Hermes: kein croniter
+   untrusted), `LOOM_JOBS` default aus. Abweichungen von Hermes: kein croniter
    (DSL strikt `once`/`every`≥5m/`daily`), Datei-pro-Job + globales `fcntl.flock`
    statt In-Process-Lock, `.trash/` statt Hard-Delete, `[SILENT]` nur als
    Exakt-Match (Hermes' Substring-Match verschluckt echte Antworten), Fehler-Alerts

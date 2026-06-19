@@ -1,0 +1,22 @@
+[Unit]
+Description=Loom skill task-queue worker — run queued heavy flows in the background
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/loom
+# The agent spawns the `claude` CLI, which lives in ~/.local/bin — not on a
+# user service's default PATH, so set it explicitly.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Secrets and LOOM_* settings live here, chmod 600. The leading "-" makes the
+# file optional so the unit still loads if it is missing.
+EnvironmentFile=-%h/.config/loom/env
+# --watch polls <vault>/<LOOM_TASK_QUEUE_DIR>/todo/ every LOOM_TASK_POLL_INTERVAL
+# seconds (default 10) and runs the queued skills (deep research, ingest, …).
+ExecStart=%h/loom/.venv/bin/loom-tasks --watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

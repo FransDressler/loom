@@ -1,4 +1,4 @@
-"""Tests für anvil doctor / anvil status (doctor.py + MCP-Tool anvil_status).
+"""Tests für loom doctor / loom status (doctor.py + MCP-Tool loom_status).
 
 systemctl/loginctl werden IMMER über subprocess-Monkeypatch gefakt, damit die
 Tests auf jedem System deterministisch laufen. Netz-Probes laufen nur mit
@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from anvil import config, doctor
+from loom import config, doctor
 
 
 def _fake_systemd(monkeypatch, *, fail_units=(), linger="yes"):
@@ -60,9 +60,9 @@ def test_feature_table_integrity():
     assert len(set(names)) == 26
     for f in doctor.FEATURES:
         for flag in f.flags:
-            assert flag.startswith("ANVIL_")
-            # jede Flag-Env hat ihre Quelle als config-Attribut (ANVIL_X -> config.X)
-            assert hasattr(config, flag.removeprefix("ANVIL_")), flag
+            assert flag.startswith("LOOM_")
+            # jede Flag-Env hat ihre Quelle als config-Attribut (LOOM_X -> config.X)
+            assert hasattr(config, flag.removeprefix("LOOM_")), flag
         # enabled/configured sind callable und werfen nicht
         assert f.enabled() in (True, False)
         ok, detail = f.configured()
@@ -76,12 +76,12 @@ def test_feature_table_integrity():
 
 def test_secret_redaction(fresh, monkeypatch):
     secret = "geheim123456789"
-    monkeypatch.setenv("ANVIL_TG_BOT_TOKEN", secret)
+    monkeypatch.setenv("LOOM_TG_BOT_TOKEN", secret)
     monkeypatch.setattr(config, "TG_BOT_TOKEN", secret)
     monkeypatch.setattr(config, "TG_CHAT_ID", "12345")
     out = doctor.render(doctor.run_status())
     assert secret not in out
-    assert "ANVIL_TG_BOT_TOKEN gesetzt" in out  # Detail sagt nur "gesetzt", nie den Wert
+    assert "LOOM_TG_BOT_TOKEN gesetzt" in out  # Detail sagt nur "gesetzt", nie den Wert
 
 
 # 3. Frische Installation: kein fail, Fehlendes = info -----------------------------
@@ -95,17 +95,17 @@ def test_fresh_install_no_fail(fresh):
 
 
 def test_env_file_drift_hint(fresh, monkeypatch):
-    """Variablen, die nur systemd lädt, müssen im Report als Hinweis auftauchen —
-    sonst liest sich »Kanal aus« falsch, obwohl der Service ihn längst fährt."""
+    """env-Variablen, die nicht in os.environ liegen (Laden deaktiviert/unparsebar),
+    müssen im Report als Hinweis auftauchen — sonst liest sich »Kanal aus« falsch."""
     env_file = doctor.ENV_FILE
-    env_file.write_text("# Kommentar\nANVIL_DOCTOR_DRIFT_A=1\nANVIL_DOCTOR_DRIFT_B=x\n")
+    env_file.write_text("# Kommentar\nLOOM_DOCTOR_DRIFT_A=1\nLOOM_DOCTOR_DRIFT_B=x\n")
     env_file.chmod(0o600)
-    monkeypatch.setenv("ANVIL_DOCTOR_DRIFT_A", "1")
-    monkeypatch.delenv("ANVIL_DOCTOR_DRIFT_B", raising=False)
+    monkeypatch.setenv("LOOM_DOCTOR_DRIFT_A", "1")
+    monkeypatch.delenv("LOOM_DOCTOR_DRIFT_B", raising=False)
     assert doctor._env_file_drift() == (2, 1)
     report = doctor.run_doctor(fix=False, probes=False)
     rendered = doctor.render(report, color=False)
-    assert "1 von 2 Variablen in dieser Shell nicht gesetzt" in rendered
+    assert "1 von 2 Variablen nicht in os.environ" in rendered
 
 
 # 4. Budget: Gedächtnisfläche über Cap --------------------------------------------
@@ -211,7 +211,7 @@ def test_fix_creates_dirs_never_deletes(fresh, tmp_path):
     assert (fresh / config.TASK_QUEUE_DIR / "todo").is_dir()
     assert (fresh.parent / "dump" / ".failed").is_dir()
     assert (tmp_path / "state").is_dir()
-    assert (tmp_path / "units" / "anvil-cleaner.timer").is_file()
+    assert (tmp_path / "units" / "loom-cleaner.timer").is_file()
     clean = doctor.run_doctor(fix=False, probes=False)
     assert clean.issues == []
 
@@ -255,16 +255,16 @@ def test_main_cli_exit_codes(monkeypatch, capsys):
     capsys.readouterr()  # CLI darf drucken — nur der Kern nicht
 
 
-# 9. MCP-Tool anvil_status ---------------------------------------------------------
+# 9. MCP-Tool loom_status ---------------------------------------------------------
 
-def test_mcp_anvil_status_string_no_stdout(fresh, capsys):
-    from anvil import mcp_server
+def test_mcp_loom_status_string_no_stdout(fresh, capsys):
+    from loom import mcp_server
 
-    result = asyncio.run(mcp_server.mcp.call_tool("anvil_status", {}))
+    result = asyncio.run(mcp_server.mcp.call_tool("loom_status", {}))
     captured = capsys.readouterr()
     assert captured.out == ""  # stdio ist der MCP-Protokollkanal — kein print
     text = str(result)
-    assert "Features & Flags" in text and "anvil doctor" in text
+    assert "Features & Flags" in text and "loom doctor" in text
 
 
 def test_run_status_jobs_snapshot_without_import(fresh):

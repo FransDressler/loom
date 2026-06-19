@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from anvil import discord, inbox
+from loom import discord, inbox
 
 
 def _channel(bot_id="999"):

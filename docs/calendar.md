@@ -1,14 +1,13 @@
-# Kalender — Phase 1: Lesen + Workload-Bild (`ANVIL_CALENDAR`)
+# Kalender — Phase 1: Lesen + Workload-Bild (`LOOM_CALENDAR`)
 
 ANVIL spiegelt ein 8-Wochen-Fenster deiner Kalender (Google + öffentliche
 ICS-Feeds, z. B. iCloud) in einen lokalen SQLite-Cache
 (`~/.local/state/anvil/calendar.db`). Daraus beantwortet der Chat-Agent
 „Was steht morgen an? Wie voll ist die Woche?“ (MCP-Tools `calendar_overview`,
-`calendar_events`, `calendar_freebusy`), und das Atlas-Dashboard zeigt einen
-kompakten Kalender-Block. Phase 1 ist **rein lesend** — geschrieben wird erst
+`calendar_events`, `calendar_freebusy`). Phase 1 ist **rein lesend** — geschrieben wird erst
 in Phase 2, dann ausschließlich über die Bestätigungs-Queue.
 
-Alles ist hinter `ANVIL_CALENDAR=1` verriegelt (default aus).
+Alles ist hinter `LOOM_CALENDAR=1` verriegelt (default aus).
 
 ---
 
@@ -44,11 +43,11 @@ Alles ist hinter `ANVIL_CALENDAR=1` verriegelt (default aus).
    (chmod 600, nie in den Vault):
 
    ```sh
-   ANVIL_GOOGLE_CLIENT_ID=…apps.googleusercontent.com
-   ANVIL_GOOGLE_CLIENT_SECRET=…
+   LOOM_GOOGLE_CLIENT_ID=…apps.googleusercontent.com
+   LOOM_GOOGLE_CLIENT_SECRET=…
    ```
 
-2. Einmalig autorisieren (Loopback-Callback auf Port `ANVIL_CAL_OAUTH_PORT`,
+2. Einmalig autorisieren (Loopback-Callback auf Port `LOOM_CAL_OAUTH_PORT`,
    default 8724; auf einer Headless-Box die Redirect-URL einfach ins Terminal
    einfügen):
 
@@ -65,7 +64,7 @@ Alles ist hinter `ANVIL_CALENDAR=1` verriegelt (default aus).
    ```sh
    anvil-cal --calendars          # listet IDs
    # in der env:
-   ANVIL_CAL_GOOGLE_IDS=primary   # oder kommasepariert mehrere IDs
+   LOOM_CAL_GOOGLE_IDS=primary   # oder kommasepariert mehrere IDs
    ```
 
 ---
@@ -77,11 +76,11 @@ Kalender“) oder auf icloud.com die öffentliche Freigabe aktivieren und die
 `webcal://…`-URL kopieren. Dann in der env:
 
 ```sh
-ANVIL_CAL_ICS_URLS="uni=webcal://p64-caldav.icloud.com/published/2/…,klausuren=https://…"
+LOOM_CAL_ICS_URLS="uni=webcal://p64-caldav.icloud.com/published/2/…,klausuren=https://…"
 ```
 
 Format: kommasepariert `name=url`; der Name wird zum Kalender-Label im
-Workload-Bild (und kann als `ANVIL_CAL_EXAM_CALENDAR` dienen).
+Workload-Bild (und kann als `LOOM_CAL_EXAM_CALENDAR` dienen).
 
 > ⚠️ **Diese URLs sind Bearer-Geheimnisse**: Wer die URL kennt, kann den
 > Kalender vollständig lesen. Sie gehören ausschließlich in
@@ -102,12 +101,12 @@ eine Warnung erscheint im Sync-Log, im Live-Feed und in
 
 ```sh
 # in ~/.config/anvil/env:
-ANVIL_CALENDAR=1
+LOOM_CALENDAR=1
 # optional:
-ANVIL_CAL_DAY_START=8          # Wachfenster für freie Blöcke
-ANVIL_CAL_DAY_END=22
-ANVIL_CAL_EXAM_CALENDAR=       # dedizierter Klausur-Kalender (Name/ID) …
-ANVIL_CAL_EXAM_PATTERN=klausur|prüfung|exam   # … sonst Titel-Muster
+LOOM_CAL_DAY_START=8          # Wachfenster für freie Blöcke
+LOOM_CAL_DAY_END=22
+LOOM_CAL_EXAM_CALENDAR=       # dedizierter Klausur-Kalender (Name/ID) …
+LOOM_CAL_EXAM_PATTERN=klausur|prüfung|exam   # … sonst Titel-Muster
 
 # erster Sync + Blick auf das Ergebnis:
 anvil-cal --sync
@@ -115,13 +114,13 @@ anvil-cal --status
 anvil-cal --workload           # Workload-Bild ab heute als JSON
 
 # Timer (alle 15 min):
-cp deploy/anvil-calendar.{service,timer} ~/.config/systemd/user/
+cp deploy/loom-calendar.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload
 anvil-cal --check && systemctl --user enable --now anvil-calendar.timer
 ```
 
 `anvil-cal --check` ist das Gate fürs `anvil-start.sh`-Muster: Exit 0 nur,
-wenn `ANVIL_CALENDAR=1` und mindestens eine Quelle nutzbar ist (Google
+wenn `LOOM_CALENDAR=1` und mindestens eine Quelle nutzbar ist (Google
 autorisiert oder ein ICS-Feed konfiguriert).
 
 ## 4. Was danach automatisch da ist
@@ -130,15 +129,12 @@ autorisiert oder ein ICS-Feed konfiguriert).
   `calendar_freebusy` werden über `mcp.build_network_servers()` in jeden
   Chat-Agenten (WhatsApp/Telegram/iMessage/Discord) eingehängt, sobald das
   Flag an ist — zusammen mit den Fitness-Read-Tools.
-- **Atlas:** `/api/state` enthält einen `calendar`-Block
-  (`{today_events, next, busy_hours_today, exams_soon}`), sobald Flag + Cache
-  existieren; Termine durchlaufen die Redaction unverstümmelt.
 - **Spätere Phasen** (Coach-Workload, Tagesplan) bauen auf
   `calsync.workload()` auf; das Schreiben (Lernblöcke) ist Teil 2 unten.
 
 ---
 
-# Teil 2 — Schreiben via Propose-and-Confirm (`ANVIL_CALENDAR_WRITE`)
+# Teil 2 — Schreiben via Propose-and-Confirm (`LOOM_CALENDAR_WRITE`)
 
 ANVIL schreibt **ausschließlich** in einen dedizierten Google-Kalender
 („ANVIL Lernplan“) und **ausschließlich nach Bestätigung im Chat** — jede
@@ -155,8 +151,8 @@ ist über das Google-Konto auf dem iPhone sichtbar.
    ```sh
    anvil-cal --calendars          # listet IDs (…@group.calendar.google.com)
    # in ~/.config/anvil/env:
-   ANVIL_CALENDAR_WRITE=1
-   ANVIL_CAL_WRITE_ID=…@group.calendar.google.com
+   LOOM_CALENDAR_WRITE=1
+   LOOM_CAL_WRITE_ID=…@group.calendar.google.com
    ```
 
    **Beide** müssen gesetzt sein — fehlt eines, verweigert der Handler jede
@@ -189,14 +185,14 @@ Antworte mit Nummern (z.B. »1 3«), »alle« oder »keine«.
 Antwort `1 3` / `alle` / `keine` im Chat führt aus bzw. verwirft.
 
 > ⏱ **TTL vs. Poll-Latenz:** Ein Vorschlag bleibt
-> `ANVIL_CONFIRM_PENDING_TTL_H` Stunden (Default 48) beantwortbar, danach
+> `LOOM_CONFIRM_PENDING_TTL_H` Stunden (Default 48) beantwortbar, danach
 > verfällt er still. Die Antwort wird erst vom **nächsten Poll** des Kanals
 > verarbeitet — die Ausführung folgt also mit Poll-Latenz, nicht sofort.
 
 ## 7. Sicherheitsmodell
 
 - **Nur der eine Kalender:** geschrieben wird ausschließlich in
-  `ANVIL_CAL_WRITE_ID`; alle anderen Kalender sind für Writes tabu.
+  `LOOM_CAL_WRITE_ID`; alle anderen Kalender sind für Writes tabu.
 - **Eigene-Events-Signatur:** jedes ANVIL-Event trägt
   `extendedProperties.private.anvil="1"`. `update`/`delete` verweigern HART
   alles ohne diese Signatur — ANVIL fasst nie menschliche Termine an, auch

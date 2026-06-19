@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "loom": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/..", "loom-mcp"],
+      "env": {}
+    }
+  }
+}

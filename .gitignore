@@ -8,4 +8,29 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Secrets & local config — NEVER commit real credentials.
+# The real env lives at ~/.config/anvil/env (outside the repo); these guard
+# against accidentally committing a copy. The example file is tracked on purpose.
+.env
+*.env
+!*.env.example
+anvil.env
+
+# Local state, caches, OAuth token caches (default STATE_DIR = ~/.local/state/anvil,
+# outside the repo — these patterns catch any copy that lands in-tree).
+*.db
+*.sqlite
+*.sqlite3
+*_tokens.json
+state/
+.trash/
+
+# Logs & transcription scratch
+*.log
 research.log
+
+# OS / editor junk
+.DS_Store
+__MACOSX/
+*.swp

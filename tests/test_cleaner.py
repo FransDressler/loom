@@ -9,7 +9,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from anvil import archive, cleaner, config, confirm
+from loom import archive, cleaner, config, confirm
 
 
 @pytest.fixture
@@ -156,7 +156,7 @@ def test_write_month_digest_is_mechanical_and_idempotent(vault):
     conv = vault / "conversations" / "2026"
     d = date.today() - timedelta(days=70)
     month = d.strftime("%Y-%m")
-    n1 = _session(conv, d, "waha", title="WAHA Relay eingebaut", project="anvil-brain")
+    n1 = _session(conv, d, "waha", title="WAHA Relay eingebaut", project="loom")
     n2 = _session(conv, d, "skizze", title="Skizze besprochen")
 
     digest = cleaner.write_month_digest(vault, month, [n1, n2])
@@ -164,7 +164,7 @@ def test_write_month_digest_is_mechanical_and_idempotent(vault):
     text = digest.read_text()
     assert "type: digest" in text
     assert f"[[{n1.stem}]]" in text and "WAHA Relay eingebaut" in text
-    assert "(Projekt: anvil-brain)" in text
+    assert "(Projekt: loom)" in text
     assert f"[[{n2.stem}]]" in text
 
     # second run appends nothing new
@@ -289,3 +289,63 @@ def test_write_note_finds_existing_session_note_recursively(tmp_path):
     )
     assert target == existing  # idempotent: same session note overwritten in place
     assert "Neu zusammengefasst" in existing.read_text()
+
+
+# --- under-linked + stub detection ----------------------------------------------
+
+def _note(vault, rel: str, body: str, *, days: int = 30):
+    """A plain note, backdated out of the fold-in window so the soft detectors see it."""
+    path = vault / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+    _backdate(path, days)
+    return path
+
+
+def test_find_underlinked_flags_dead_ends_but_not_connected_notes(vault, monkeypatch):
+    monkeypatch.setattr(config, "CLEANER_MIN_LINKS", 2)
+    # hub links to both — gives each one incoming link
+    _note(vault, "wissen/hub.md", "# Hub\nSiehe [[alpha]] und [[beta]].\n" + "Wort " * 60)
+    _note(vault, "wissen/alpha.md", "Verweist auf [[beta]].\n" + "Wort " * 60)   # out1 + in1 = 2 → ok
+    _note(vault, "wissen/beta.md", "Kein Auslink.\n" + "Wort " * 60)             # in2 (hub+alpha) = 2 → ok
+    _note(vault, "wissen/lonely.md", "Niemand verlinkt mich.\n" + "Wort " * 60)  # 0 → flagged
+    flagged = {rel for rel, _ in cleaner.find_underlinked(vault)}
+    assert "wissen/lonely.md" in flagged
+    assert "wissen/alpha.md" not in flagged
+    assert "wissen/beta.md" not in flagged
+
+
+def test_find_underlinked_excuses_fresh_captures(vault, monkeypatch):
+    monkeypatch.setattr(config, "CLEANER_MIN_LINKS", 2)
+    monkeypatch.setattr(config, "CLEANER_FOLDIN_MAX_AGE_DAYS", 3)
+    _note(vault, "eingang/frisch.md", "Lose Notiz.\n" + "Wort " * 60, days=0)
+    assert cleaner.find_underlinked(vault) == []
+
+
+def test_find_stubs_flags_thin_prose_but_not_empty_or_rich(vault, monkeypatch):
+    monkeypatch.setattr(config, "CLEANER_MIN_WORDS", 50)
+    _note(vault, "wissen/stub.md", "Nur ein paar Wörter hier, viel zu wenig Substanz.")
+    _note(vault, "wissen/rich.md", "[[x]] " + "Inhalt " * 60)
+    _note(vault, "wissen/leer.md", "")  # owned by find_empty, not find_stubs
+    flagged = {rel for rel, _ in cleaner.find_stubs(vault)}
+    assert "wissen/stub.md" in flagged
+    assert "wissen/rich.md" not in flagged
+    assert "wissen/leer.md" not in flagged
+
+
+def test_find_stubs_keeps_terse_media_notes(vault, monkeypatch):
+    monkeypatch.setattr(config, "CLEANER_MIN_WORDS", 50)
+    _note(vault, "wissen/figur.md", "![[diagram.png]]\nKurz.")
+    assert cleaner.find_stubs(vault) == []
+
+
+def test_collect_candidates_includes_new_detectors_when_enabled(vault, monkeypatch):
+    for flag in ("CLEANER_EMPTY", "CLEANER_ORPHANS", "CLEANER_DUPLICATES", "CLEANER_OLD_CONVERSATIONS"):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr(config, "CLEANER_UNDERLINKED", True)
+    monkeypatch.setattr(config, "CLEANER_STUBS", True)
+    monkeypatch.setattr(config, "CLEANER_MIN_LINKS", 2)
+    monkeypatch.setattr(config, "CLEANER_MIN_WORDS", 50)
+    _note(vault, "wissen/stub.md", "Zu kurz und unverlinkt.")
+    paths = {c["path"] for c in cleaner.collect_candidates(vault)}
+    assert "wissen/stub.md" in paths

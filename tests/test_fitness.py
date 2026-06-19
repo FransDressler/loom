@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from anvil import config, fitness
+from loom import config, fitness
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "OURA_CLIENT_SECRET", "")
     monkeypatch.setattr(config, "STRAVA_CLIENT_ID", "")
     monkeypatch.setattr(config, "STRAVA_CLIENT_SECRET", "")
-    # Pin the flags the tests rely on, independent of the host's ANVIL_* env.
+    # Pin the flags the tests rely on, independent of the host's LOOM_* env.
     monkeypatch.setattr(config, "STRAVA_WITH_STREAMS", True)
     monkeypatch.setattr(config, "FITNESS_ANALYZE", True)
     vault = tmp_path / "vault"
@@ -363,14 +363,15 @@ def test_note_paths(env):
 
 
 def test_fitness_query_sql_guard():
-    from anvil.mcp.fitness import _is_safe_sql
-
-    assert _is_safe_sql("SELECT * FROM activities")
-    assert _is_safe_sql("WITH t AS (SELECT 1) SELECT * FROM t")
-    assert not _is_safe_sql("DELETE FROM activities")
-    assert not _is_safe_sql("SELECT * FROM pragma_database_list")  # path leak via PRAGMA
-    assert not _is_safe_sql("WITH t AS (SELECT 1) SELECT attach_helper FROM t WHERE ATTACH = 1")
-    assert not _is_safe_sql("select * from x; attach database '/etc/foo.db' as y")
+    # The guard lives in loom.fitness now (one source for both MCP layers).
+    assert fitness.is_safe_sql("SELECT * FROM activities")
+    assert fitness.is_safe_sql("WITH t AS (SELECT 1) SELECT * FROM t")
+    assert not fitness.is_safe_sql("DELETE FROM activities")
+    assert not fitness.is_safe_sql("UPDATE athlete SET value = 'x'")
+    assert not fitness.is_safe_sql("SELECT * FROM pragma_database_list")  # path leak via PRAGMA
+    assert not fitness.is_safe_sql("SELECT 1; PRAGMA table_info(activities)")
+    assert not fitness.is_safe_sql("WITH t AS (SELECT 1) SELECT attach_helper FROM t WHERE ATTACH = 1")
+    assert not fitness.is_safe_sql("select * from x; attach database '/etc/foo.db' as y")
 
 
 def test_is_ready_and_status(env, monkeypatch):
@@ -389,7 +390,7 @@ def test_is_ready_and_status(env, monkeypatch):
 def test_fitness_prompts_exist_and_carry_anchors(env):
     """Regression für den ImportError-Blocker: fitness.py:796/897 importieren die
     beiden Builder — sie müssen existieren und die Kern-Anker tragen."""
-    from anvil.prompt import build_fitness_analyze_prompt, build_fitness_plan_prompt
+    from loom.prompt import build_fitness_analyze_prompt, build_fitness_plan_prompt
 
     plan = build_fitness_plan_prompt()
     ana = build_fitness_analyze_prompt()
@@ -403,7 +404,7 @@ def test_fitness_prompts_exist_and_carry_anchors(env):
 def test_run_plan_writes_note_with_mocked_agent(env, monkeypatch):
     import asyncio
 
-    import anvil.agent as agent
+    import loom.agent as agent
 
     vault = env / "vault"
     captured = {}
@@ -432,7 +433,7 @@ def test_run_plan_reports_unwritten_note(env, monkeypatch):
     """Schreibt der Agent die Notiz nicht, darf der Tag NICHT als geplant gelten."""
     import asyncio
 
-    import anvil.agent as agent
+    import loom.agent as agent
 
     vault = env / "vault"
 
@@ -462,7 +463,7 @@ def test_day_context_omits_external_load_when_calendar_off(env, monkeypatch):
 def test_day_context_includes_external_load(env, monkeypatch):
     monkeypatch.setattr(config, "CALENDAR", True)
 
-    import anvil.calsync as calsync
+    import loom.calsync as calsync
 
     today = date.today()
     monkeypatch.setattr(calsync, "workload", lambda day, days=7: {
@@ -485,7 +486,7 @@ def test_day_context_survives_broken_calendar(env, monkeypatch):
     """Kalenderprobleme dürfen den Coach nie stoppen — Abschnitt fehlt einfach."""
     monkeypatch.setattr(config, "CALENDAR", True)
 
-    import anvil.calsync as calsync
+    import loom.calsync as calsync
 
     def boom(day, days=7):
         raise OSError("calendar.db kaputt")
@@ -497,3 +498,167 @@ def test_day_context_survives_broken_calendar(env, monkeypatch):
     finally:
         conn.close()
     assert "Externe Last" not in ctx and "Datenlage" in ctx
+
+
+# --- read-only query surface (shared by both MCP layers) -------------------------
+
+_NO_DATA = "Noch keine Fitness-Daten"
+
+
+def _seed_store(conn):
+    """A minimal store: two workouts today, an Oura readiness doc, one load row."""
+    today = date.today().isoformat()
+    conn.execute(
+        "INSERT INTO activities (id, start_date, day, name, sport_type, distance_m, "
+        "moving_time_s, average_heartrate, tss, raw_json, synced_at) "
+        "VALUES (42, ?, ?, 'Morning Ride', 'Ride', 30000, 3600, 140, 80, '{}', '')",
+        (f"{today}T06:00:00Z", today),
+    )
+    conn.execute(
+        "INSERT INTO activities (id, start_date, day, name, sport_type, distance_m, "
+        "moving_time_s, average_heartrate, tss, raw_json, synced_at) "
+        "VALUES (43, ?, ?, 'Gym', 'WeightTraining', NULL, 2700, NULL, 30, '{}', '')",
+        (f"{today}T18:00:00Z", today),
+    )
+    conn.execute(
+        "INSERT INTO oura_docs (collection, doc_id, day, raw_json, synced_at) "
+        "VALUES ('daily_readiness', 'r1', ?, ?, '')",
+        (today, json.dumps({"score": 82, "contributors": {"hrv_balance": 70}})),
+    )
+    conn.execute(
+        "INSERT INTO daily_load (day, tss, ctl, atl, tsb) VALUES (?, 80, 50, 60, -10)",
+        (today,),
+    )
+    conn.commit()
+
+
+def test_read_db_none_and_texts_without_store(env):
+    """No store yet ⇒ read_db is None and every read tool says so instead of crashing."""
+    assert fitness.read_db() is None
+    assert _NO_DATA in fitness.overview_text()
+    assert _NO_DATA in fitness.activities_text()
+    assert _NO_DATA in fitness.oura_docs_text("daily_readiness")
+    assert _NO_DATA in fitness.query_text("SELECT 1")
+
+
+def test_overview_text_renders_today(env):
+    conn = fitness.open_db()
+    _seed_store(conn)
+    conn.close()
+    out = fitness.overview_text()
+    assert "Datenlage" in out
+    assert "Readiness 82" in out
+    assert "CTL 50" in out and "TSB -10" in out
+
+
+def test_activities_text_lists_and_filters(env):
+    conn = fitness.open_db()
+    _seed_store(conn)
+    conn.close()
+    out = fitness.activities_text(days=14)
+    assert "Ride" in out and "WeightTraining" in out
+    assert "30.0 km" in out and "ID 42" in out
+    only_ride = fitness.activities_text(days=14, sport="Ride")
+    assert "Ride" in only_ride and "WeightTraining" not in only_ride
+    assert "Keine Workouts" in fitness.activities_text(days=14, sport="Swim")
+
+
+def test_oura_docs_text_returns_json_or_empty(env):
+    conn = fitness.open_db()
+    _seed_store(conn)
+    conn.close()
+    assert '"score": 82' in fitness.oura_docs_text("daily_readiness", days=7)
+    assert "Keine sleep-Dokumente" in fitness.oura_docs_text("sleep", days=7)
+
+
+def test_query_text_runs_select(env):
+    conn = fitness.open_db()
+    _seed_store(conn)
+    conn.close()
+    out = fitness.query_text("SELECT sport_type, tss FROM activities ORDER BY id")
+    assert '"sport_type": "Ride"' in out and '"tss": 80.0' in out
+
+
+def test_query_text_rejects_unsafe_and_reports_errors(env):
+    conn = fitness.open_db()
+    _seed_store(conn)
+    conn.close()
+    assert "nur SELECT/WITH" in fitness.query_text("DELETE FROM activities")
+    assert "Fehler" in fitness.query_text("SELECT * FROM nonexistent_table")
+
+
+def test_read_windows_normalize_zero_to_default(env):
+    """days=0 falls back to the default window, identical across both MCP layers.
+
+    A workout/Oura doc from 3 days ago is invisible if days=0 meant "today only";
+    the normalization (days or 14 / 7) keeps it in scope.
+    """
+    conn = fitness.open_db()
+    three = (date.today() - timedelta(days=3)).isoformat()
+    conn.execute(
+        "INSERT INTO activities (id, start_date, day, name, sport_type, "
+        "moving_time_s, tss, raw_json, synced_at) "
+        "VALUES (99, ?, ?, 'Old Ride', 'Ride', 3600, 50, '{}', '')",
+        (f"{three}T06:00:00Z", three),
+    )
+    conn.execute(
+        "INSERT INTO oura_docs (collection, doc_id, day, raw_json, synced_at) "
+        "VALUES ('daily_sleep', 's3', ?, ?, '')",
+        (three, json.dumps({"score": 70})),
+    )
+    conn.commit()
+    conn.close()
+    assert "Old Ride" in fitness.activities_text(days=0)
+    assert '"score": 70' in fitness.oura_docs_text("daily_sleep", days=0)
+
+
+# --- Oura scope handling --------------------------------------------------------
+
+
+def test_oura_scopes_request_stress():
+    """daily_stress + daily_resilience are in the default sync, so the `stress`
+    scope MUST be requested — the API 401s ("stress scope") without it."""
+    from loom import oura
+
+    assert "stress" in oura.SCOPES.split()
+
+
+def test_oura_authed_get_scope_401_is_scope_error_without_refresh(env, monkeypatch):
+    """A 401 mentioning 'scope' fails fast as OuraScopeError — a refresh can't grant
+    a missing scope, so none is attempted."""
+    from loom import oura
+
+    def boom(method, url, *, headers=None, form=None, timeout):
+        raise oura._HttpError(401, {}, '{"detail":"Token is not authorized access stress scope."}')
+
+    refreshed: list = []
+    monkeypatch.setattr(oura, "_http", boom)
+    monkeypatch.setattr(oura, "refresh_tokens", lambda t, cb=None: refreshed.append(True))
+    # expires_at far in the future, else _authed_get refreshes proactively first.
+    with pytest.raises(oura.OuraScopeError):
+        oura.fetch_collection(
+            {"access_token": "a", "expires_at": 9e9}, "daily_stress", "2026-06-10", "2026-06-16"
+        )
+    assert not refreshed  # scope error short-circuits before the refresh path
+
+
+def test_sync_oura_skips_collection_missing_scope(env, monkeypatch):
+    """A scope-401 on one collection skips only that one — readiness etc. still sync."""
+    monkeypatch.setattr(config, "OURA_CLIENT_ID", "id")
+    monkeypatch.setattr(config, "OURA_CLIENT_SECRET", "sec")
+    monkeypatch.setattr(config, "OURA_COLLECTIONS", "daily_readiness,daily_stress")
+    fitness.save_tokens("oura", {"access_token": "a", "refresh_token": "r", "expires_at": 9e9})
+
+    def fake_fetch(tokens, collection, start, end, *, on_refresh=None):
+        if collection == "daily_stress":
+            raise fitness.oura.OuraScopeError("GET /v2/usercollection/daily_stress -> stress scope")
+        return [{"id": "x1", "day": "2026-06-16", "score": 80}]
+
+    monkeypatch.setattr(fitness.oura, "fetch_collection", fake_fetch)
+    conn = fitness.open_db()
+    try:
+        result = fitness.sync_oura(conn)
+    finally:
+        conn.close()
+    assert result["docs"] == 1                          # daily_readiness still landed
+    assert result["scope_skipped"] == ["daily_stress"]  # un-scoped one skipped, not fatal

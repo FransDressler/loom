@@ -16,7 +16,7 @@ import types
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
 
-from anvil import feynman, mdconvert
+from loom import feynman, mdconvert
 
 
 # --- transcription backend selection --------------------------------------------

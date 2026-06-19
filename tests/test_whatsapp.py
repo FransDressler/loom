@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import base64
 
-from anvil import cleaner, inbox, whatsapp
+from loom import cleaner, inbox, whatsapp
 
 WA = whatsapp.WhatsAppChannel
 

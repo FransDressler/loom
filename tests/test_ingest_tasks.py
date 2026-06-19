@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from anvil import ingest, research, tasks
+from loom import ingest, research, tasks
 
 _RAW = research.config.RESEARCH_DEEP_RAW_SUBDIR
 

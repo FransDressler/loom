@@ -1,0 +1,15 @@
+[Unit]
+Description=Loom Discord inbox — poll the REST API and capture into the vault
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/loom
+# The agent spawns the `claude` CLI, which lives in ~/.local/bin — not on a
+# user service's default PATH, so set it explicitly.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Secrets (LOOM_DISCORD_BOT_TOKEN, etc.) live here, chmod 600. The leading "-"
+# makes the file optional so the unit still loads if it is missing.
+EnvironmentFile=-%h/.config/loom/env
+ExecStart=%h/loom/.venv/bin/loom-discord --poll

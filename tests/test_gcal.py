@@ -1,4 +1,4 @@
-"""Tests für den Google-Calendar-Client (anvil.gcal). Netzfrei.
+"""Tests für den Google-Calendar-Client (loom.gcal). Netzfrei.
 
 Alles läuft durch den einen `_http`-Trichter; die Tests hängen dort einen
 Routing-Fake ein (Muster tests/test_strava.py) und prüfen den OAuth-Flow
@@ -13,7 +13,7 @@ import urllib.parse
 
 import pytest
 
-from anvil import gcal
+from loom import gcal
 
 # Eine Refresh-Antwort von Google: NUR ein neues Access-Token, KEIN refresh_token.
 _REFRESH_PAYLOAD = {"access_token": "at-2", "expires_in": 3599, "token_type": "Bearer"}
@@ -126,7 +126,7 @@ def test_refresh_invalid_grant_names_the_seven_day_trap(monkeypatch):
         raise gcal._HttpError(400, {}, '{"error": "invalid_grant"}')
 
     _route(monkeypatch, handler)
-    with pytest.raises(gcal.GcalError, match="anvil-cal --auth google"):
+    with pytest.raises(gcal.GcalError, match="loom-cal --auth google"):
         gcal.refresh_tokens(_tokens())
 
 

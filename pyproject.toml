@@ -1,8 +1,10 @@
 [project]
-name = "anvil-brain"
+name = "loom"
 version = "0.1.0"
 description = "ANVIL — a second brain over an Obsidian vault, powered by the Claude Agent SDK"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.14"
 dependencies = [
     "claude-agent-sdk>=0.2.87",
@@ -19,29 +21,29 @@ dependencies = [
 feynman = ["faster-whisper>=1.0"]
 
 [project.scripts]
-anvil = "anvil.cli:main"
-anvil-archive = "anvil.archive:main"
-anvil-imessage = "anvil.imessage:main"
-anvil-whatsapp = "anvil.whatsapp:main"
-anvil-telegram = "anvil.telegram:main"
-anvil-discord = "anvil.discord:main"
-anvil-cleaner = "anvil.cleaner:main"
-anvil-builder = "anvil.builder_inbox:main"
-anvil-ingest = "anvil.ingest:main"
-anvil-feynman = "anvil.feynman:main"
-anvil-fitness = "anvil.fitness:main"
-anvil-dayplan = "anvil.dayplan:main"
-anvil-cal = "anvil.calsync:main"
-anvil-tasks = "anvil.tasks:main"
-anvil-mcp = "anvil.mcp_server:main"
-anvil-web = "anvil.web:main"
+loom = "loom.cli:main"
+loom-archive = "loom.archive:main"
+loom-imessage = "loom.imessage:main"
+loom-whatsapp = "loom.whatsapp:main"
+loom-telegram = "loom.telegram:main"
+loom-discord = "loom.discord:main"
+loom-cleaner = "loom.cleaner:main"
+loom-builder = "loom.builder_inbox:main"
+loom-ingest = "loom.ingest:main"
+loom-feynman = "loom.feynman:main"
+loom-fitness = "loom.fitness:main"
+loom-anki = "loom.anki:main"
+loom-dayplan = "loom.dayplan:main"
+loom-cal = "loom.calsync:main"
+loom-tasks = "loom.tasks:main"
+loom-mcp = "loom.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/anvil"]
+packages = ["src/loom"]
 
 [dependency-groups]
 dev = [

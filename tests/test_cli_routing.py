@@ -1,7 +1,7 @@
 """Tests: CLI-Routing für die neuen Subkommandos doctor/status/jobs.
 
 Schutzziel: die drei Kommandos sind in sub.choices registriert und werden VOR
-dem Freitext-Capture-Pfad geroutet — sonst würde `anvil status` als Gedanke in
+dem Freitext-Capture-Pfad geroutet — sonst würde `loom status` als Gedanke in
 den Vault captured (cli.main routet manuell über das erste Bare-Token).
 """
 
@@ -12,7 +12,7 @@ import sys
 
 import pytest
 
-from anvil import cli, doctor, jobs
+from loom import cli, doctor, jobs
 
 
 def _forbid_prompt_path(monkeypatch):

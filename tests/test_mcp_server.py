@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from anvil import builder_inbox, config, mcp_server, retrieve
+from loom import builder_inbox, config, mcp_server, retrieve
 
 
 @pytest.fixture
@@ -185,3 +185,35 @@ def test_retrieve_default_scope_excludes_archiv_and_ops():
     assert f"`{config.ARCHIV_DIR}/`" in scope[1]
     full = retrieve.build_retrieve_options("/tmp/vault", None, full_scope=True)
     assert "# Search scope" not in full.system_prompt
+
+
+# --- fitness data tools (front-end exposure of the shared read surface) ----------
+
+
+@pytest.fixture
+def fitness_env(tmp_path, monkeypatch):
+    """Point the fitness store at an empty tmp path so the read tools see no data
+    (never the host's real ~/.local/state/loom/fitness.db)."""
+    monkeypatch.setattr(config, "FITNESS_DB", str(tmp_path / "fitness.db"))
+    monkeypatch.setattr(config, "STATE_DIR", str(tmp_path / "state"))
+    return tmp_path
+
+
+def test_server_registers_fitness_data_tools():
+    names = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
+    assert {
+        "fitness_status", "fitness_sync", "fitness_plan",
+        "fitness_overview", "fitness_activities", "fitness_oura", "fitness_query",
+    } <= names
+
+
+def test_fitness_overview_tool_without_store(fitness_env):
+    res = asyncio.run(mcp_server.mcp.call_tool("fitness_overview", {}))
+    assert "Noch keine Fitness-Daten" in str(res)
+
+
+def test_fitness_query_tool_guards_writes(fitness_env):
+    res = asyncio.run(
+        mcp_server.mcp.call_tool("fitness_query", {"sql": "DELETE FROM activities"})
+    )
+    assert "nur SELECT/WITH" in str(res)

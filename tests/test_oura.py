@@ -1,4 +1,4 @@
-"""Tests for the Oura API v2 client (anvil.oura). Network-free.
+"""Tests for the Oura API v2 client (loom.oura). Network-free.
 
 All HTTP goes through oura._http, so the tests swap it for a fake that records
 calls and replays queued responses/_HttpError objects; time is frozen by
@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from anvil import oura
+from loom import oura
 
 NOW = 1_750_000_000
 

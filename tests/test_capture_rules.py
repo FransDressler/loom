@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from anvil import config, consolidate, prompt
+from loom import config, consolidate, prompt
 
 
 @pytest.fixture
@@ -85,8 +85,8 @@ def test_system_prompt_teaches_dayplan_editing(monkeypatch):
     der Chat-Agent braucht dafür Pfad + Auftrag im System-Prompt."""
     from datetime import date
 
-    from anvil import config
-    from anvil.prompt import build_system_prompt
+    from loom import config
+    from loom.prompt import build_system_prompt
 
     monkeypatch.setattr(config, "REPORTS_DIR", "ops/reports")
     text = build_system_prompt()

@@ -1,0 +1,12 @@
+[Unit]
+Description=Loom Tagesplan — Kalender + Training + Kanban → eine abarbeitbare Tagesnotiz
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/loom
+# Der Planer-Agent spawnt die `claude`-CLI aus ~/.local/bin — explizit auf den PATH.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-%h/.config/loom/env
+ExecStart=%h/loom/.venv/bin/loom-dayplan --daily

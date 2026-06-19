@@ -1,6 +1,6 @@
 """Tests für kanban.py + die kanban-MCP-Integration: Create→List→Move-Roundtrip
 (Frontmatter + Ordner konsistent), Toleranz gegen kaputtes Frontmatter,
-top_tasks-Sortierung, Traversal-Abwehr und das ANVIL_KANBAN-Flag-Gate.
+top_tasks-Sortierung, Traversal-Abwehr und das LOOM_KANBAN-Flag-Gate.
 Komplett netz- und agentenfrei, alles läuft gegen einen tmp-Vault."""
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from anvil import config, events, kanban
-from anvil.mcp import kanban_tools
+from loom import config, events, kanban
+from loom.mcp import kanban_tools
 
 
 @pytest.fixture
@@ -187,7 +187,7 @@ def test_move_collision_in_target_gets_suffix(vault):
     assert (vault / "ops" / "tasks" / moved_b.rel_path).is_file()
 
 
-# --- Flag-Gate: Chat-Tools nur mit ANVIL_KANBAN ----------------------------------------
+# --- Flag-Gate: Chat-Tools nur mit LOOM_KANBAN ----------------------------------------
 
 def test_build_is_none_without_flag(vault, monkeypatch):
     monkeypatch.setattr(config, "KANBAN", False)
@@ -205,7 +205,7 @@ def test_build_with_flag_exposes_kanban_server(vault, monkeypatch):
 
 
 def test_network_servers_respect_flag(vault, monkeypatch):
-    from anvil import mcp as anvil_mcp
+    from loom import mcp as anvil_mcp
 
     monkeypatch.setattr(config, "KANBAN", False)
     _, tools = anvil_mcp.build_network_servers()

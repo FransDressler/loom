@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from anvil import config, consolidate, context_hint, events, prompt
-from anvil.inbox import load_state, save_chat_turns, save_state
+from loom import config, consolidate, context_hint, events, prompt
+from loom.inbox import load_state, save_chat_turns, save_state
 
 
 @pytest.fixture
@@ -59,12 +59,12 @@ def test_events_rotation_keeps_newest_half(state_dir, monkeypatch):
 
 def test_facts_injects_memory_surfaces_only_when_enabled(vault, state_dir, monkeypatch):
     (vault / config.PROFILE_FILE).write_text("X" * 5000)
-    (vault / config.PROJECTS_FILE).write_text("Projekt: anvil-brain")
+    (vault / config.PROJECTS_FILE).write_text("Projekt: loom")
     monkeypatch.setattr(config, "MEMORY_NOTES", False)
     assert "Gedächtnis-Flächen" not in prompt._facts()
     monkeypatch.setattr(config, "MEMORY_NOTES", True)
     facts = prompt._facts()
-    assert "Projekt: anvil-brain" in facts
+    assert "Projekt: loom" in facts
     # the profile surface is hard-capped, not injected wholesale
     assert "X" * prompt._MEMORY_MAX_CHARS in facts
     assert "X" * (prompt._MEMORY_MAX_CHARS + 1) not in facts
@@ -113,7 +113,7 @@ def test_consolidate_dry_run_keeps_chats_dirty(state_dir, vault, monkeypatch):
     async def fake_run_once(prompt_text, options, verbose):
         ran["prompt"] = prompt_text
 
-    import anvil.agent as agent
+    import loom.agent as agent
 
     monkeypatch.setattr(agent, "run_once", fake_run_once)
     consolidate.run_consolidate()
@@ -132,7 +132,7 @@ def test_consolidate_armed_marks_done_and_prunes_idle(state_dir, vault, monkeypa
     async def fake_run_once(prompt_text, options, verbose):
         return None
 
-    import anvil.agent as agent
+    import loom.agent as agent
 
     monkeypatch.setattr(agent, "run_once", fake_run_once)
     consolidate.run_consolidate()

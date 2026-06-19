@@ -1,4 +1,4 @@
-"""Tests für Sync-Orchestrierung, Cache und workload() (anvil.calsync). Netzfrei.
+"""Tests für Sync-Orchestrierung, Cache und workload() (loom.calsync). Netzfrei.
 
 gcal/icalfeed werden auf Modulebene gemockt (wie fitness.strava in
 tests/test_fitness.py); geprüft werden Sync-Idempotenz (Vollabgleich entfernt
@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from anvil import calsync, config, fitness, icalfeed
+from loom import calsync, config, fitness, icalfeed
 
 
 @pytest.fixture
@@ -321,7 +321,7 @@ def test_ics_sources_parses_names_and_bare_urls(env, monkeypatch):
 
 
 def test_workload_persists_for_mcp_roundtrip(env):
-    """workload() muss JSON-serialisierbar sein (MCP-Tools, anvil-cal --workload)."""
+    """workload() muss JSON-serialisierbar sein (MCP-Tools, loom-cal --workload)."""
     day = date(2026, 6, 15)
     conn = calsync.open_db()
     _insert(conn, "ics:uni", "j1", "Termin", "2026-06-15T09:00:00", "2026-06-15T10:00:00")

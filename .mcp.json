@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "anvil": {
-      "command": "/home/frans/anvil-brain/.venv/bin/anvil-mcp",
-      "args": [],
+    "loom": {
+      "command": "uv",
+      "args": ["run", "loom-mcp"],
       "env": {}
     }
   }

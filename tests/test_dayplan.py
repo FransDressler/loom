@@ -8,7 +8,7 @@ from datetime import date, datetime
 
 import pytest
 
-from anvil import config, dayplan
+from loom import config, dayplan
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def env(tmp_path, monkeypatch):
 # --- Gate ---------------------------------------------------------------------------
 
 def test_due_waits_for_training_plan_until_fallback(env, monkeypatch):
-    from anvil import fitness
+    from loom import fitness
 
     today = date.today()
     early = datetime.now().replace(hour=6, minute=0)
@@ -56,14 +56,14 @@ def test_context_degrades_to_generic_day(env):
 
 
 def test_context_includes_available_sources(env, monkeypatch):
-    from anvil import fitness
+    from loom import fitness
 
     today = date.today()
     iso = today.isoformat()
     monkeypatch.setattr(config, "CALENDAR", True)
     monkeypatch.setattr(config, "KANBAN", True)
 
-    import anvil.calsync as calsync
+    import loom.calsync as calsync
 
     monkeypatch.setattr(calsync, "workload", lambda day, days=7: {
         "events": [
@@ -79,7 +79,7 @@ def test_context_includes_available_sources(env, monkeypatch):
         "warnings": [],
     })
 
-    import anvil.kanban as kanban
+    import loom.kanban as kanban
 
     monkeypatch.setattr(kanban, "top_tasks", lambda n: [
         {"title": "Übungsblatt 7", "due": iso, "priority": 1,
@@ -117,7 +117,7 @@ def test_hiwi_hours_by_calendar_name_beats_pattern(env, monkeypatch):
 # --- run_daily -----------------------------------------------------------------------
 
 def test_run_daily_writes_note_and_marks_day(env, monkeypatch):
-    import anvil.agent as agent
+    import loom.agent as agent
 
     today = date.today()
     rel = dayplan.plan_note_rel(today)
@@ -139,7 +139,7 @@ def test_run_daily_writes_note_and_marks_day(env, monkeypatch):
 
 
 def test_run_daily_does_not_mark_day_without_note(env, monkeypatch):
-    import anvil.agent as agent
+    import loom.agent as agent
 
     async def lazy(text, options):
         return "nur geredet"

@@ -1,4 +1,4 @@
-"""Tests für das fence-bewusste Chunking (anvil.chunking) und seine Verdrahtung
+"""Tests für das fence-bewusste Chunking (loom.chunking) und seine Verdrahtung
 im Listener-Sendepfad (_reply, Confirm-Sender) und im Notifier. Netzwerkfrei.
 
 Die zentrale Invariante: JEDER Chunk beginnt mit dem Eigen-Tag (Confirm-/
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import re
 
-from anvil import confirm, inbox, listener, notify
-from anvil.chunking import split_message, utf16_len
+from loom import confirm, inbox, listener, notify
+from loom.chunking import split_message, utf16_len
 
 
 def _no_indicator(chunk: str) -> str:
@@ -150,7 +150,7 @@ def test_run_poll_sends_long_agent_reply_in_tagged_chunks(monkeypatch, tmp_path)
                   + "\n".join(f"x{i} = {i}" for i in range(80))
                   + "\n```\nEnde")
 
-    async def fake_run(prompt, options):
+    async def fake_run(prompt, options, session_id=None):
         return long_reply
 
     monkeypatch.setattr(inbox, "run_capture", fake_run)

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from anvil import config, figures, mathpix, prompt, research
+from loom import config, figures, mathpix, prompt, research
 
 
 def _call(args: dict) -> str:

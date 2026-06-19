@@ -9,7 +9,7 @@
   `.md` in `builder-inbox/todo/` → `working/` (claim-by-move, idempotent) → `done/`.
   `submit_complaint()`, der Builder-Agent (`run_builder_once`/`run_builder_watch`),
   das `file_complaint`-MCP-Tool, der Builder-Prompt. CLI: `anvil complain`,
-  `anvil builder [--watch]`; Script `anvil-builder`; systemd `deploy/anvil-builder.service`
+  `anvil builder [--watch]`; Script `anvil-builder`; systemd `deploy/loom-builder.service`
   (10-s-`--watch`). Tests: `tests/test_builder_inbox.py` (8, grün).
 - ✅ **Baustein 2 — Retrieval-Agent** (`src/anvil/retrieve.py`): `anvil retrieve "<frage>"`.
   Read-only Agent (Read/Glob/Grep + `file_complaint`), entscheidet Weite/Tiefe selbst,
@@ -36,15 +36,15 @@
   nachwachsende Kontext" aus Baustein 4 hat jetzt Mechanik statt nur Hoffnung:
   (a) **Memory-Flächen** `ANVIL — Profil & Präferenzen` / `ANVIL — Aktuelle Projekte`
   (budgetiert, `stand:`-Datum) via `prompt._facts()` in jeden Agenten injiziert
-  (`ANVIL_MEMORY_NOTES`); (b) **`anvil context-hint`** — deterministischer
-  UserPromptSubmit-Hook (<1 s, kein LLM, fail-open, `ANVIL_CONTEXT_HINT`): letztes
+  (`LOOM_MEMORY_NOTES`); (b) **`anvil context-hint`** — deterministischer
+  UserPromptSubmit-Hook (<1 s, kein LLM, fail-open, `LOOM_CONTEXT_HINT`): letztes
   retrieve-Topic+Alter (`retrieve_state.json`, pro Session gekeyt) + Titel-Treffer als
   Wegweiser → der Hauptagent merkt Themenwechsel und ruft `retrieve` selbst neu;
   (c) **Schlaf-Konsolidierung** (`src/anvil/consolidate.py`, Cleaner-Pass,
-  `ANVIL_CLEANER_CONSOLIDATE`): destilliert dirty Chats in Episoden
+  `LOOM_CLEANER_CONSOLIDATE`): destilliert dirty Chats in Episoden
   (`conversations/<jahr>/`) BEVOR sie aus dem 16er-Fenster fallen, pflegt die
   Memory-Flächen + `ops/checkpoints/`; Dry-Run default, günstigeres Modell via
-  `ANVIL_CONSOLIDATE_MODEL`, Retention in den STATE-Trash (`ANVIL_CHAT_RETENTION_DAYS`).
+  `LOOM_CONSOLIDATE_MODEL`, Retention in den STATE-Trash (`LOOM_CHAT_RETENTION_DAYS`).
   Kontext-Politik (Memory-first, Retrieve-Disziplin, Belief-Updates) steht in der
   Schema-Note + Vault-`CLAUDE.md`. Tests: `tests/test_context.py` (11, grün).
   Nebenbefund repariert: `events.py` + `agent._publish` fehlten im Working Tree
@@ -93,7 +93,7 @@ entscheidet selbst**, sobald er die gesuchten Sachen nicht in seinem Kontext fin
 - Befüllt von **Agents (automatisch, bei Scope-Miss)** *und* **mir (manuell)**.
 - **Ordnerstruktur:** dedizierter Ordner, getrennt von der agent-network-`inbox/` —
   `builder-inbox/todo/` → `builder-inbox/done/` (Name konfigurierbar, analog
-  `ANVIL_INBOX_DIR`). Eine Beschwerde startet in `todo`; nachdem der Builder sie
+  `LOOM_INBOX_DIR`). Eine Beschwerde startet in `todo`; nachdem der Builder sie
   behoben hat, wird der Eintrag nach `done` verschoben.
 - **Polling:** wird **alle 10 s gecheckt, solange das Projekt gelauncht ist**
   (One-Shot-`--poll`-Command per systemd-Timer — dasselbe Muster wie die

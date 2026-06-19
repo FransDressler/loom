@@ -1,0 +1,22 @@
+[Unit]
+Description=Loom builder-inbox worker — work queued complaints down and revise notes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/loom
+# The agent spawns the `claude` CLI, which lives in ~/.local/bin — not on a
+# user service's default PATH, so set it explicitly.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Secrets and LOOM_* settings live here, chmod 600. The leading "-" makes the
+# file optional so the unit still loads if it is missing.
+EnvironmentFile=-%h/.config/loom/env
+# --watch polls <builder-inbox>/todo/ every LOOM_BUILDER_POLL_INTERVAL seconds
+# (default 10) for as long as the project runs.
+ExecStart=%h/loom/.venv/bin/loom-builder --watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

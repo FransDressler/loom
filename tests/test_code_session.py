@@ -1,4 +1,4 @@
-"""Tests for headless code sessions (anvil.code_session). Network/subprocess-free."""
+"""Tests for headless code sessions (loom.code_session). Network/subprocess-free."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from anvil import code_session, tasks
+from loom import code_session, tasks
 
 
 class _FakeProc:
@@ -149,7 +149,7 @@ def test_run_code_task_timeout_falls_back_without_pgid(monkeypatch, tmp_path):
 def test_run_code_task_requires_valid_code_dir(monkeypatch):
     monkeypatch.setattr(code_session.config, "CODE_SESSIONS", True)
     monkeypatch.setattr(code_session.config, "CODE_DIR", "/nope/not/a/dir")
-    assert "ANVIL_CODE_DIR" in asyncio.run(code_session.run_code_task("x"))
+    assert "LOOM_CODE_DIR" in asyncio.run(code_session.run_code_task("x"))
 
 
 def test_run_code_task_requires_claude_cli(monkeypatch, tmp_path):
@@ -179,7 +179,7 @@ def test_run_code_task_tool_rejects_empty_and_unset_dir(monkeypatch, tmp_path):
     assert "keine Aufgabe" in asyncio.run(code_session.run_code_task_tool.handler({"task": "  "}))["content"][0]["text"]
     monkeypatch.setattr(code_session.config, "CODE_DIR", "")
     miss = asyncio.run(code_session.run_code_task_tool.handler({"task": "do it"}))
-    assert "ANVIL_CODE_DIR" in miss["content"][0]["text"]
+    assert "LOOM_CODE_DIR" in miss["content"][0]["text"]
 
 
 # --- dispatch through the task worker ------------------------------------------

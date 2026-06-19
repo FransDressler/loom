@@ -1,4 +1,4 @@
-"""Tests for the Strava API v3 client (anvil.strava). Network-free.
+"""Tests for the Strava API v3 client (loom.strava). Network-free.
 
 Everything goes through the single `_http` funnel, so the tests install a routing
 fake there and exercise the OAuth flows, the in-place token-rotation contract, the
@@ -12,7 +12,7 @@ import urllib.parse
 
 import pytest
 
-from anvil import strava
+from loom import strava
 
 # What the token endpoint answers on a refresh: a ROTATED pair + absolute epoch.
 _REFRESH_PAYLOAD = {"access_token": "at-2", "refresh_token": "rt-2",

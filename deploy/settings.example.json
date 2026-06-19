@@ -1,0 +1,19 @@
+{
+  "vault": "~/ANVIL",
+  "extraction": "markitdown",
+  "provider": "claude-code",
+
+  "_comment_mathpix": "Set extraction to \"mathpix\" and fill this block to use Mathpix OCR instead of markitdown:",
+  "mathpix": {
+    "app_id": "",
+    "app_key": ""
+  },
+
+  "_comment_env": "Power-user escape hatch — any raw LOOM_* override goes here, verbatim. Wins over the friendly fields above. The installer preserves this block on re-run.",
+  "env": {
+  },
+
+  "_comment_secrets": "Same as env, conventionally for API keys/tokens (e.g. chat-channel or fitness OAuth). chmod 600 the real file.",
+  "secrets": {
+  }
+}

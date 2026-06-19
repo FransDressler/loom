@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll the Loom Telegram inbox every couple of minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+# Don't stack runs if a poll runs long (an agent capture can take a while).
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

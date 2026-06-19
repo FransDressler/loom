@@ -1,0 +1,23 @@
+[Unit]
+Description=Loom Feynman watcher — examine spoken subject explanations against the vault
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/loom
+# The agent spawns the `claude` CLI, which lives in ~/.local/bin — not on a
+# user service's default PATH, so set it explicitly.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Secrets and LOOM_* settings live here, chmod 600. The leading "-" makes the
+# file optional so the unit still loads if it is missing.
+EnvironmentFile=-%h/.config/loom/env
+# --watch checks the recordings folder (LOOM_FEYNMAN_DIR, default ~/loom-feynman)
+# every LOOM_FEYNMAN_POLL_INTERVAL seconds (default 5) and answers new recordings.
+# Set the default subject via LOOM_FEYNMAN_SUBJECT or a "<subject>__" file prefix.
+ExecStart=%h/loom/.venv/bin/loom-feynman --watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

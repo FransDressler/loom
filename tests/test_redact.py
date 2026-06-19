@@ -1,20 +1,20 @@
-"""Tests für anvil.redact (Env-Scrubbing + Output-Redaction). Netz-/prozessfrei."""
+"""Tests für loom.redact (Env-Scrubbing + Output-Redaction). Netz-/prozessfrei."""
 
 from __future__ import annotations
 
 import asyncio
 
-from anvil import redact
+from loom import redact
 
 
 # --- scrub_env -------------------------------------------------------------
 
 def test_scrub_env_droppt_secret_variablen():
     env = {
-        "ANVIL_BB_PASSWORD": "imsg-geheim",
+        "LOOM_BB_PASSWORD": "imsg-geheim",
         "TELEGRAM_BOT_TOKEN": "123456789:AAFakeTokenFakeTokenFakeToken12",
-        "ANVIL_WA_API_KEY": "waha-key-123",
-        "ANVIL_WEB_AUTH": "web-secret",
+        "LOOM_WA_API_KEY": "waha-key-123",
+        "LOOM_WEB_AUTH": "web-secret",
         "CI_WEBHOOK": "https://hooks.example/x",
         "DB_CREDENTIALS": "user:pass",
         "MY_APIKEY": "abc",
@@ -35,7 +35,7 @@ def test_scrub_env_behaelt_allowlist_und_unverdaechtiges():
         "LANG": "de_DE.UTF-8",
         "TERM": "xterm-256color",
         "XDG_RUNTIME_DIR": "/run/user/1000",
-        "VIRTUAL_ENV": "/home/frans/anvil-brain/.venv",
+        "VIRTUAL_ENV": "/home/frans/loom/.venv",
     }
     assert redact.scrub_env(env) == env
 
@@ -65,17 +65,17 @@ def test_redact_text_maskiert_url_credentials():
 
 def test_redact_text_ersetzt_env_secret_wert_im_fliesstext():
     # Ein opakes Secret OHNE erkennbares Muster wird über seinen WERT gefangen.
-    env = {"ANVIL_WA_API_KEY": "waha-superkey-987654"}
+    env = {"LOOM_WA_API_KEY": "waha-superkey-987654"}
     out = redact.redact_text("Konfiguriert mit waha-superkey-987654, bitte prüfen.", env=env)
     assert "waha-superkey-987654" not in out
-    assert "[REDAKTIERT:ANVIL_WA_API_KEY]" in out
+    assert "[REDAKTIERT:LOOM_WA_API_KEY]" in out
 
 
 def test_redact_text_nimmt_default_environ(monkeypatch):
-    monkeypatch.setenv("ANVIL_TEST_FAKE_TOKEN", "tok-abcdefgh-123")
+    monkeypatch.setenv("LOOM_TEST_FAKE_TOKEN", "tok-abcdefgh-123")
     out = redact.redact_text("Wert ist tok-abcdefgh-123.")
     assert "tok-abcdefgh-123" not in out
-    assert "[REDAKTIERT:ANVIL_TEST_FAKE_TOKEN]" in out
+    assert "[REDAKTIERT:LOOM_TEST_FAKE_TOKEN]" in out
 
 
 def test_redact_text_telegram_token_eng_am_format():
@@ -109,7 +109,7 @@ def test_redact_text_laesst_harmlosen_text_mit_telefonnummer():
 # --- code_session: gescrubbtes env + redaktierte Auslieferung -------------------
 
 def _patch_code_session(monkeypatch, tmp_path, *, out=b"ok", stat=""):
-    from anvil import code_session
+    from loom import code_session
 
     monkeypatch.setattr(code_session.config, "CODE_SESSIONS", True)
     monkeypatch.setattr(code_session.config, "CODE_DIR", str(tmp_path))
@@ -144,16 +144,16 @@ def _patch_code_session(monkeypatch, tmp_path, *, out=b"ok", stat=""):
 
 def test_code_session_spawnt_mit_gescrubbtem_env(monkeypatch, tmp_path):
     code_session, captured = _patch_code_session(monkeypatch, tmp_path)
-    monkeypatch.setenv("ANVIL_BB_PASSWORD", "imsg-geheim-123")
+    monkeypatch.setenv("LOOM_BB_PASSWORD", "imsg-geheim-123")
     asyncio.run(code_session.run_code_task("mach was"))
     env = captured.get("env")
     assert env is not None  # Spawn bekommt ein explizites (gescrubbtes) env
-    assert "ANVIL_BB_PASSWORD" not in env
+    assert "LOOM_BB_PASSWORD" not in env
     assert "PATH" in env and "HOME" in env  # Unverdächtiges bleibt erhalten
 
 
 def test_code_session_redaktiert_summary_und_diff(monkeypatch, tmp_path):
-    monkeypatch.setenv("ANVIL_BB_PASSWORD", "imsg-geheim-123")
+    monkeypatch.setenv("LOOM_BB_PASSWORD", "imsg-geheim-123")
     code_session, _ = _patch_code_session(
         monkeypatch, tmp_path,
         out=b"Fertig. Gefundener Key: sk-ant-api03-abcdefghijklmnopqrstuv9999",
@@ -162,4 +162,4 @@ def test_code_session_redaktiert_summary_und_diff(monkeypatch, tmp_path):
     result = asyncio.run(code_session.run_code_task("zeig die config"))
     assert "sk-ant-api03-abcdefghijklmnopqrstuv9999" not in result
     assert "imsg-geheim-123" not in result
-    assert "[REDAKTIERT:ANVIL_BB_PASSWORD]" in result
+    assert "[REDAKTIERT:LOOM_BB_PASSWORD]" in result

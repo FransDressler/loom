@@ -1,8 +1,8 @@
-"""Tests for the progress notifier (anvil.notify). Network-free."""
+"""Tests for the progress notifier (loom.notify). Network-free."""
 
 from __future__ import annotations
 
-from anvil import inbox, notify
+from loom import inbox, notify
 
 
 class _FakeChannel:

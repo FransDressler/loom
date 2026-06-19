@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from anvil import builder_inbox, config
+from loom import builder_inbox, config
 
 
 @pytest.fixture
@@ -158,7 +158,7 @@ def test_request_research_tool_requires_topic(vault):
 
 def test_research_complaint_stays_in_todo_when_research_disabled(vault, monkeypatch):
     # A research complaint must NOT be claimed/launched when escalation is off — it is
-    # left queued for when ANVIL_BUILDER_ALLOW_RESEARCH is enabled or run by hand.
+    # left queued for when LOOM_BUILDER_ALLOW_RESEARCH is enabled or run by hand.
     monkeypatch.setattr(config, "BUILDER_ALLOW_RESEARCH", False)
     builder_inbox.submit_complaint("X fehlt ganz", "im Vault nicht vorhanden", kind="research")
     n = asyncio.run(builder_inbox.run_builder_once(str(vault)))

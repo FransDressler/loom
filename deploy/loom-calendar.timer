@@ -1,0 +1,14 @@
+[Unit]
+Description=Loom Kalender-Sync alle 15 min (Vollabgleich, idempotent)
+
+[Timer]
+# Alle 15 Minuten (LOOM_CAL_POLL_MIN; bei Änderung hier UND in der env anpassen —
+# workload() warnt, sobald der Cache älter als 3×POLL_MIN ist). Der Sync ist ein
+# transaktionaler Vollabgleich je Quelle, ein verpasster Slot holt alles nach:
+# kein Persistent nötig. Aktivieren nur, wenn `loom-cal --check` passt
+# (LOOM_CALENDAR=1 + autorisierte/konfigurierte Quelle) — Muster loom-start.sh.
+OnCalendar=*:00/15
+AccuracySec=2min
+
+[Install]
+WantedBy=timers.target

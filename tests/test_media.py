@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from anvil import inbox, mdconvert
+from loom import inbox, mdconvert
 
 
 # --- mdconvert classification --------------------------------------------------

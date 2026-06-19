@@ -1,0 +1,14 @@
+[Unit]
+Description=Loom fitness — Oura/Strava-Sync, Tagestrainingsplan & Workout-Analysen
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/loom
+# The coach agents spawn the `claude` CLI, which lives in ~/.local/bin — not on a
+# user service's default PATH, so set it explicitly.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Secrets (LOOM_OURA_*/LOOM_STRAVA_* client credentials) live here, chmod 600.
+EnvironmentFile=-%h/.config/loom/env
+ExecStart=%h/loom/.venv/bin/loom-fitness --daily

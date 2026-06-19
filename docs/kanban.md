@@ -1,15 +1,13 @@
-# Kanban — Phase 3: Vault-Tasks + Atlas-Board (`ANVIL_KANBAN`)
+# Kanban — Vault-Tasks (`LOOM_KANBAN`)
 
 ANVIL führt Aufgaben als gewöhnliche Vault-Notizen: eine `.md`-Datei je
 Aufgabe in `<vault>/ops/tasks/{todo,working,done}/`. **Der Ordner ist der
-autoritative Status** — das Atlas-Board (`/board`), die Chat-Tools
-(`task_add`/`task_list`/`task_move`) und später der Tagesplan-Generator
-arbeiten alle auf denselben Dateien. Es gibt keinen zweiten Datenbestand,
-keinen Sync: Obsidian, Board und Chat sehen immer dasselbe.
+autoritative Status** — die Chat-Tools (`task_add`/`task_list`/`task_move`)
+und der Tagesplan-Generator arbeiten alle auf denselben Dateien. Es gibt
+keinen zweiten Datenbestand, keinen Sync: Obsidian und Chat sehen immer dasselbe.
 
-Alles ist hinter `ANVIL_KANBAN=1` verriegelt (default aus). Ohne Flag
-antworten `/board` und `/api/board*` mit 404, und die Chat-Tools werden gar
-nicht erst registriert.
+Alles ist hinter `LOOM_KANBAN=1` verriegelt (default aus). Ohne Flag werden
+die Chat-Tools gar nicht erst registriert.
 
 ---
 
@@ -50,29 +48,9 @@ der slugifizierte Titel, Kollisionen bekommen ein `-2`/`-3`-Suffix (nie
 überschreiben). Der Titel auf Board/Chat kommt aus der ersten
 `# `-Überschrift, sonst aus dem Dateinamen.
 
-## 3. Atlas-Board
+## 3. Chat-Tools (MCP-Server `kanban`)
 
-- `GET /board` — zweite Atlas-Seite (Catppuccin/Geist, gleiche Optik wie das
-  Dashboard): drei Spalten TODO/WORKING/DONE, natives HTML5-Drag&Drop,
-  Add-Feld im Header. Ohne Login erscheint die Login-Seite (wie `/`).
-- `GET /api/board` — frischer Read der drei Ordner, **bewusst eigener
-  Endpunkt**: weder der 5-s-Cache von `/api/state` noch dessen globale
-  Redaction passen zu Drag&Drop (eigene Aufgaben-Titel dürfen nicht als
-  `[REDAKTIERT:…]` enden). `done` ist auf die jüngsten 50 Karten gekappt
-  (die Dateien bleiben natürlich alle liegen).
-- `POST /api/board/add {title, due?, priority?, project?, effort?}` →
-  `create_task` (landet in `todo/`, `source: board`).
-- `POST /api/board/move {file, to}` → `move_task`. `file` ist strikt relativ
-  innerhalb des Kanban-Ordners (`todo/aufgabe.md`); absolute Pfade, `..` und
-  Punktdateien werden mit 400 abgewiesen. `to` muss `todo|working|done` sein.
-
-Nach jedem Add/Move publiziert der Server ein `kanban`-Event auf den
-vorhandenen SSE-Feed (`/api/events`) — ein zweiter offener Board-Tab (oder
-ein Move aus dem Chat) aktualisiert sich darüber live.
-
-## 4. Chat-Tools (MCP-Server `kanban`)
-
-Registriert über `mcp.build_network_servers()`, nur wenn `ANVIL_KANBAN=1`:
+Registriert über `mcp.build_network_servers()`, nur wenn `LOOM_KANBAN=1`:
 
 | Tool        | Zweck                                                              |
 | ----------- | ------------------------------------------------------------------ |
@@ -80,18 +58,18 @@ Registriert über `mcp.build_network_servers()`, nur wenn `ANVIL_KANBAN=1`:
 | `task_list` | Offene Aufgaben (Default, sortiert due → priority → created) oder eine Spalte / alles. |
 | `task_move` | Spaltenwechsel über den Pfad aus `task_list` (z. B. `todo/x.md`).  |
 
-## 5. Tagesplan-Schnittstelle
+## 4. Tagesplan-Schnittstelle
 
 `kanban.top_tasks(n)` liefert die n dringendsten offenen Aufgaben
 (todo + working) als dicts (`title`/`due`/`priority`/`effort`/`file`,
 Sortierung due → priority → created, fehlendes `due` ans Ende) — genau das
 Format, das `dayplan.build_plan_context()` (Phase 5) konsumiert.
 
-## 6. Konfiguration
+## 5. Konfiguration
 
 ```sh
-ANVIL_KANBAN=1            # Feature an (default 0)
-ANVIL_KANBAN_DIR=ops/tasks  # Ordner relativ zum Vault (Default; selten ändern)
+LOOM_KANBAN=1            # Feature an (default 0)
+LOOM_KANBAN_DIR=ops/tasks  # Ordner relativ zum Vault (Default; selten ändern)
 ```
 
 Die drei Status-Ordner werden bei Bedarf automatisch angelegt. Wer den

@@ -1,4 +1,4 @@
-"""Tests für anvil-jobs: Schedule-DSL, Zeitlogik, Store (flock/.trash), die beiden
+"""Tests für loom-jobs: Schedule-DSL, Zeitlogik, Store (flock/.trash), die beiden
 Tick-Invarianten (at-most-once, Capture-Loop-Präfix), Delivery-Fehlertrennung und
 die Tool-/Listener-Registrierung. Netzwerkfrei; STATE_DIR/Vault via tmp_path."""
 
@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from anvil import config, inbox, jobs, listener, tasks
+from loom import config, inbox, jobs, listener, tasks
 
 
 @pytest.fixture
@@ -258,8 +258,8 @@ def test_is_silent_strict_match():
 
 
 def test_run_job_silent_suppresses_and_empty_fails(state_dir, vault, monkeypatch):
-    import anvil.agent as agent
-    from anvil import whatsapp
+    import loom.agent as agent
+    from loom import whatsapp
 
     sent: list[str] = []
     monkeypatch.setattr(whatsapp, "send_text", lambda chat, m: sent.append(m))
@@ -288,8 +288,8 @@ def test_run_job_silent_suppresses_and_empty_fails(state_dir, vault, monkeypatch
 # --- 9. INVARIANTE Capture-Loop ----------------------------------------------------------
 
 def test_delivery_chunks_all_tagged_including_error_alert(state_dir, vault, monkeypatch):
-    import anvil.agent as agent
-    from anvil import whatsapp
+    import loom.agent as agent
+    from loom import whatsapp
 
     sent: list[tuple[str, str]] = []
     monkeypatch.setattr(whatsapp, "send_text", lambda chat, m: sent.append((chat, m)))
@@ -320,8 +320,8 @@ def test_delivery_chunks_all_tagged_including_error_alert(state_dir, vault, monk
 # --- 10. Delivery-Fehlertrennung -----------------------------------------------------------
 
 def test_delivery_error_tracked_separately_from_job_status(state_dir, vault, monkeypatch):
-    import anvil.agent as agent
-    from anvil import whatsapp
+    import loom.agent as agent
+    from loom import whatsapp
 
     async def fine_agent(prompt, options):
         return "Bericht"
@@ -341,8 +341,8 @@ def test_delivery_error_tracked_separately_from_job_status(state_dir, vault, mon
 
 
 def test_delivery_fallback_notifier_and_its_absence(state_dir, vault, monkeypatch):
-    import anvil.agent as agent
-    from anvil import notify
+    import loom.agent as agent
+    from loom import notify
 
     async def fine_agent(prompt, options):
         return "Bericht"
@@ -361,7 +361,7 @@ def test_delivery_fallback_notifier_and_its_absence(state_dir, vault, monkeypatc
 
 
 def test_run_job_marks_run_even_if_deliver_crashes(state_dir, vault, monkeypatch):
-    import anvil.agent as agent
+    import loom.agent as agent
 
     async def fine_agent(prompt, options):
         return "Bericht"
@@ -382,8 +382,8 @@ def test_run_job_marks_run_even_if_deliver_crashes(state_dir, vault, monkeypatch
 
 
 def test_delivery_fallback_send_failure_is_tracked_not_swallowed(state_dir, vault, monkeypatch):
-    import anvil.agent as agent
-    from anvil import notify
+    import loom.agent as agent
+    from loom import notify
 
     async def fine_agent(prompt, options):
         return "Bericht"
@@ -472,8 +472,8 @@ def test_listener_registers_jobs_server_except_discord(state_dir, vault, monkeyp
     monkeypatch.setattr(listener.config, "JOBS", True)
     opts = listener.build_inbox_options(_FakeChannel("whatsapp"))
     assert jobs.JOBS_TOOL in opts.allowed_tools
-    assert "anvil_jobs" in opts.mcp_servers
+    assert "loom_jobs" in opts.mcp_servers
     # Discord ist untrusted (Dritte können posten) → dort bewusst kein schedule_job
     opts = listener.build_inbox_options(_FakeChannel("discord"))
     assert jobs.JOBS_TOOL not in opts.allowed_tools
-    assert "anvil_jobs" not in opts.mcp_servers
+    assert "loom_jobs" not in opts.mcp_servers

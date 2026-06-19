@@ -1,4 +1,4 @@
-"""Tests für den ICS-Feed-Leser (anvil.icalfeed) + das ICS-Redact-Muster. Netzfrei.
+"""Tests für den ICS-Feed-Leser (loom.icalfeed) + das ICS-Redact-Muster. Netzfrei.
 
 Die ICS-Fixtures liegen inline (RFC-5545-Schnipsel mit CRLF); geprüft werden
 Unfolding/Escaping, TZID via zoneinfo, ganztägige Termine, das RRULE-Subset
@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from anvil import icalfeed, redact
+from loom import icalfeed, redact
 
 TZ = ZoneInfo("Europe/Berlin")
 # Festes Fenster: Mo 2026-06-08 bis Mo 2026-08-03 (8 Wochen) — deterministisch.
