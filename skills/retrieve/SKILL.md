@@ -14,7 +14,8 @@ is what you install into a non-Claude host such as
 ## Required tools
 
 - **`Read`, `Glob`, `Grep`** — host-native filesystem tools, scoped to the vault root
-  (the host's working directory). Read-only use only.
+  (the host's working directory). Read-only use only. `Read` also opens images, so the
+  agent can inspect a figure before embedding it.
 - **`complain`** — Loom's MCP tool `mcp__loom__complain` (provider-free; pure disk).
   Wire the Loom MCP server into your host: `uv run --directory /path/to/loom anvil-mcp`.
 
@@ -40,10 +41,18 @@ not cover the question, you FILE A COMPLAINT (see below) rather than inventing a
      adding signal.
    Don't dump the whole vault; don't stop one note short of the answer. Spend the budget
    the question actually needs.
-3. **ANSWER** — synthesize a direct answer grounded ONLY in what you read. Cite notes
-   inline as `[[Note Name]]`. Be concise. If parts are uncertain or the vault only
-   partially covers it, say so explicitly.
-4. **SCOPE-MISS** — if the vault does NOT adequately answer the question, call the
+3. **COLLECT FIGURES** — while reading, note the IMAGE EMBEDS each note carries: Obsidian
+   embeds `![[datei.jpg]]` (often under a `## Abbildungen` heading) and Markdown images
+   `![alt](pfad)`. Figures are part of the answer, not decoration. Track which figure backs
+   which claim; you may open an image with Read to judge it (Read accepts images).
+4. **ANSWER** — synthesize a direct answer grounded ONLY in what you read. Cite notes
+   inline as `[[Note Name]]`. EMBED the figures that actually illustrate your points INLINE,
+   right next to the prose they support, using the embed EXACTLY as written in the source
+   note (`![[datei.jpg]]` — copy the filename/path VERBATIM, never invent one), each with a
+   one-line italic caption `*Abb.: …*`. Reuse 1–4 of the most telling real figures; skip
+   logos/decorative ones; if the notes embed none, answer in text only (never fabricate an
+   image). Be concise. If the vault only partially covers it, say so explicitly.
+5. **SCOPE-MISS** — if the vault does NOT adequately answer the question, call the
    `complain` tool (do this IN ADDITION to giving your best partial answer):
    - `kind='gap'` when relevant notes exist but are too thin / miss the specific point —
      set `targets` to those notes' paths so the builder knows what to extend.

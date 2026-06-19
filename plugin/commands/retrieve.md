@@ -6,6 +6,8 @@ allowed-tools: Bash, Read, mcp__loom__retrieve
 
 Beantworte gegen den ANVIL-Vault: **$ARGUMENTS**
 
+Der Agent bettet dabei die zugehörigen **Abbildungen** der gelesenen Notizen verbatim als `![[datei.jpg]]` direkt in die Erklärung ein (rendert in claudian/Obsidian) — nicht nur Text.
+
 Bevorzugt das MCP-Tool (read-only, billig, schnell): rufe `mcp__loom__retrieve` mit `question="$ARGUMENTS"` auf. Für archivierte Inhalte zusätzlich `full_scope=True` (nur über das MCP-Tool möglich — bezieht `archiv/` und die ops-Queues ein).
 
 CLI-Fallback (immer Default-Scope, kein `--full-scope`):
