@@ -1,6 +1,6 @@
 ---
 name: anki
-description: Turn a Loom/Obsidian vault's knowledge notes into atomic Anki flashcards and push them into the running Anki desktop app via AnkiConnect, then optionally sync to AnkiWeb — host-agnostic. Runs on ANY agent host (Claude Code, Hermes+Gemini, …): it only needs Read/Glob/Grep plus Bash/curl. AnkiConnect is a plain local HTTP API, so NO special MCP tool is required — the host LLM writes the cards itself and POSTs them with curl.
+description: Turn a Loom/Obsidian vault's knowledge notes into atomic Anki flashcards and push them into the running Anki desktop app via AnkiConnect, then optionally sync to AnkiWeb — host-agnostic. Use whenever the user wants flashcards or Anki cards, to study or memorize something from their vault, says "make cards", "add these to Anki", "build a quiz deck", or to push notes into Anki — even if they don't say "anki" explicitly. Runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it only needs Read/Glob/Grep plus Bash/curl. AnkiConnect is a plain local HTTP API, so NO special MCP tool is required — the host LLM writes the cards itself and POSTs them with curl.
 ---
 
 # Loom — Anki (portable skill)
@@ -43,13 +43,15 @@ If this fails to connect, the Anki desktop app is not running or the AnkiConnect
 add-on (code 2055492159) is not installed — STOP and tell the user, don't invent
 cards into the void.
 
-List existing decks:
+List existing decks (fetch these so the user can pick which one to add to — see the loop):
 ```bash
 curl -s http://127.0.0.1:8766 -X POST \
   -d '{"action":"deckNames","version":6}'
 ```
 
-Create the target deck if missing (idempotent — no error if it already exists):
+Create the CHOSEN deck if missing (idempotent — no error if it already exists; replace
+`ANVIL` with the deck the user picked, e.g. a themed sub-deck `ANVIL::Thermodynamik` —
+Anki nests decks with `::`):
 ```bash
 curl -s http://127.0.0.1:8766 -X POST \
   -d '{"action":"createDeck","version":6,"params":{"deck":"ANVIL"}}'
@@ -77,8 +79,9 @@ curl -s http://127.0.0.1:8766 -X POST -d '{
 }'
 ```
 `result` is one id per note: a number = added, `null` = skipped as duplicate.
-Defaults on this user's setup: deck `"ANVIL"`, model `"Basic"`, fields `"Front"`
-/ `"Back"`, tag `"anvil"`. (Build the JSON programmatically; for many cards write
+Defaults on this user's setup: model `"Basic"`, fields `"Front"` / `"Back"`, tag
+`"anvil"` — the DECK is chosen per run (see the loop), with `"ANVIL"` only a fallback
+suggestion, never a forced target. (Build the JSON programmatically; for many cards write
 the payload to a temp file and `curl … -d @file.json`.)
 
 Sync to AnkiWeb (optional — same as the desktop Sync button):
@@ -97,24 +100,36 @@ READ-ONLY on the vault: never write or edit a note.
 
 1. **CHECK ANKI FIRST** — call the `version` action (above). If it fails, STOP
    and tell the user Anki/AnkiConnect isn't reachable; do not generate cards.
-2. **READ** — Glob/Grep/Read the vault for the topic's concepts. Expand search
+2. **CHOOSE THE DECK (ask, don't assume)** — call `deckNames` to fetch ALL of the
+   user's existing decks. Separating topics into their own decks is exactly what the
+   user wants, so never silently dump everything into one pile:
+   - If the user ALREADY named a deck (in the prompt or their config), use THAT and
+     don't ask — the question would just be friction.
+   - Otherwise SHOW the fetched decks and ASK which one to add to, making clear they
+     can name a NEW deck to spin one up (a name Anki hasn't seen becomes a fresh deck).
+     If one existing deck obviously matches the topic, suggest it; for a brand-new
+     topic, a themed sub-deck like `ANVIL::Thermodynamik` (Anki nests with `::`) is a
+     good default suggestion. STOP and wait for the answer before writing cards — this
+     one question is the whole point of the change.
+3. **READ** — Glob/Grep/Read the vault for the topic's concepts. Expand search
    terms with the vault's glossary note (synonyms + translations) so a hit
    doesn't fail on wording or language. If the vault barely covers the topic,
    make FEWER cards and say so — never pad.
-3. **WRITE CARDS yourself** — atomic: ONE fact or idea per card; many small cards
+4. **WRITE CARDS yourself** — atomic: ONE fact or idea per card; many small cards
    over few dense ones. Front = a precise question/cue; Back = the shortest
    complete answer. Test recall and understanding, not phrasing trivia. Use the
    user's own terminology and LANGUAGE (German notes ⇒ German cards). Cover the
    key points; never duplicate the same fact across cards.
-4. **PUSH** — `createDeck` for the target deck, then ONE `addNotes` call with the
-   whole batch. Read back the `result`: count numbers as added, `null`s as
-   duplicates skipped. Re-running the same topic is safe — prefer completeness.
-5. **SYNC (optional)** — only if the user asked for an AnkiWeb sync (or their
+5. **PUSH** — `createDeck` for the CHOSEN deck (idempotent — safe if it exists), then
+   ONE `addNotes` call with the whole batch and every note's `deckName` set to that
+   deck. Read back the `result`: count numbers as added, `null`s as duplicates
+   skipped. Re-running the same topic into the same deck is safe — prefer completeness.
+6. **SYNC (optional)** — only if the user asked for an AnkiWeb sync (or their
    config defaults to it), call the `sync` action exactly once. Otherwise leave
    syncing to the user.
-6. **REPORT** — a short summary in the user's language: how many cards added vs.
-   skipped as duplicates, the deck name, and the sub-topics covered. If you made
-   few or no cards because the vault was thin, say so plainly — do not pretend
+7. **REPORT** — a short summary in the user's language: how many cards added vs.
+   skipped as duplicates, WHICH deck they went into, and the sub-topics covered. If
+   you made few or no cards because the vault was thin, say so plainly — do not pretend
    coverage you didn't find.
 
 ## Hard limits

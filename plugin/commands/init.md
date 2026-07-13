@@ -43,6 +43,7 @@ Dokumente einarbeiten: Datei in den **Drop-Ordner** `~/anvil-dump` legen → `/l
 - `/loom:ingest` — Dokumente aus `~/anvil-dump` einarbeiten (OCR → raw + Quellnotiz + Concept-Wiki).
 - `/loom:wiki <cluster>` — Quellnotizen ins Konzept-Wiki integrieren (Theme-Unterordner, MOC als einzige Datei im Fachordner; Unifächer folgen dem Studienplan).
 - `/loom:deep-research <thema>` — tiefe Mehrquellen-Recherche → verlinkter Notiz-Cluster (teuer).
+- `/loom:checkpoint <thema>` — nach langer Diskussion einen Wiedereinstiegs-Checkpoint (`diskussionen/`) setzen UND die Erkenntnisse via `wiki` ins Konzept-Wiki überführen; `--resume [name]` steigt wieder ein.
 - `/loom:builder` — Builder-Inbox-Beschwerden abarbeiten (ein Poll-Zyklus).
 - `/loom:digest` — Überblicksnotiz neu bauen (Areas/MOCs, Kennzahlen).
 - `/loom:cleaner` — Vault entrümpeln (leere/doppelte/verwaiste Notizen → `.trash`, nach Bestätigung).

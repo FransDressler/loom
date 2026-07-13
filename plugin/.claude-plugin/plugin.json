@@ -1,7 +1,7 @@
 {
   "name": "loom",
   "version": "0.1.0",
-  "description": "Loom als Claude-Code-Plugin: die diskreten Vault-Features als /loom:*-Commands (init, ingest, digest, wiki, retrieve, deep-research, builder, fitness, cleaner, anki), plus der gebündelte ANVIL-MCP-Server (Tools unter mcp__loom__*).",
+  "description": "Loom als Claude-Code-Plugin: die diskreten Vault-Features als /loom:*-Commands (init, ingest, digest, wiki, retrieve, deep-research, graft, builder, fitness, cleaner, anki, tutor, checkpoint), plus der gebündelte ANVIL-MCP-Server (Tools unter mcp__loom__*).",
   "author": {
     "name": "Frans Dressler",
     "email": "shard.claude@gmail.com"

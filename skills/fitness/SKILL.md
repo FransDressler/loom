@@ -1,6 +1,6 @@
 ---
 name: fitness
-description: Personalized daily training plan from your own Oura + Strava data — host-agnostic. Syncs today's readiness/sleep/load, reads the data through Loom's provider-free fitness tools, then writes a dated training-plan note with a readiness traffic light and a data-driven rationale. Runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it needs host-native Read/Write plus Loom's `fitness_*` MCP tools.
+description: Personalized daily training plan from your own Oura + Strava data — host-agnostic. Syncs today's readiness/sleep/load, reads the data through Loom's provider-free fitness tools, then writes a dated training-plan note with a readiness traffic light and a data-driven rationale. Use whenever the user wants today's training or workout plan, asks "what should I train today", "plan my session", or wants a readiness-based recommendation from their Oura/Strava data — even if they don't say "fitness". Runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it needs host-native Read/Write plus Loom's `fitness_*` MCP tools.
 ---
 
 # Loom — Fitness (portable skill)
@@ -94,6 +94,10 @@ athlete's own constraints.
 
 ## Hard limits
 
+- PERSONAL coach skill: it assumes ONE athlete whose constraints (here scoliosis, FTP/LTHR,
+  forbidden exercises) live in `fitness/Athletenprofil.md` + `fitness/Saisonziel.md`. To run
+  it for a different athlete, put THEIR constraints in those profile notes — the scoliosis
+  specifics in this prompt are only the fallback when no profile exists yet.
 - Tools: host-native `Read`/`Write` plus the `fitness_*` READ tools listed above —
   no web, no shell, no `fitness_plan`.
 - Never write or edit notes outside `fitness/`. One plan note per day — overwrite

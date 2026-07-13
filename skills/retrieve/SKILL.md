@@ -1,6 +1,6 @@
 ---
 name: retrieve
-description: Cited recall over a Loom/Obsidian vault — adaptive, read-only, host-agnostic. Answers a question from the vault's notes with [[wikilink]] citations, and files a complaint when the vault doesn't cover it. Runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it only needs Read/Glob/Grep plus Loom's `complain` MCP tool.
+description: Cited recall over a Loom/Obsidian vault — adaptive, read-only, host-agnostic. Answers a question from the vault's notes with [[wikilink]] citations, and files a complaint when the vault doesn't cover it. Use this whenever the user asks a factual or conceptual question their own notes likely cover, or references something they "saved", "wrote down", "read about" or "have a note on" — even when they never mention the vault or say "retrieve"; prefer it over answering from general knowledge for anything vault-shaped. Runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it only needs Read/Glob/Grep plus Loom's `complain` MCP tool.
 ---
 
 # Loom — Retrieval (portable skill)
@@ -64,6 +64,8 @@ not cover the question, you FILE A COMPLAINT (see below) rather than inventing a
 ## Hard limits
 
 - READ-ONLY: tools are Read/Glob/Grep and `complain`. Do NOT Write or Edit any note.
+- If `complain` isn't wired into your host, skip the SCOPE-MISS filing and just state the
+  gap plainly in your answer — the rest of the loop is pure Read/Glob/Grep and still runs.
 - Default scope excludes `archiv/` and the machine-room queues (`ops/…`, `builder-inbox/`,
   `.trash/`, `.obsidian/`). Only widen scope if the user explicitly asks for archived
   content.

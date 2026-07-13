@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: Deep, multi-source research over the web/PDFs that builds a linked note cluster in a Loom/Obsidian vault — host-agnostic. Plans and discovers many sources, fetches and OCRs worthwhile PDFs/images, writes one source note per source under `raw/`, distils cross-cutting concept notes into per-theme subfolders, and ties it all together under a Hub/MOC. VERY EXPENSIVE. Runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it needs host-native WebSearch/WebFetch plus Read/Glob/Grep/Write/Edit, and (optionally) Mathpix HTTP OCR for PDFs/images.
+description: Deep, multi-source research over the web/PDFs that builds a linked note cluster in a Loom/Obsidian vault — host-agnostic. Plans and discovers many sources, fetches and OCRs worthwhile PDFs/images, writes one source note per source under `raw/`, distils cross-cutting concept notes into per-theme subfolders, and ties it all together under a Hub/MOC. Use when the user wants deep, durable, multi-source research on a topic built into their vault — "research X thoroughly", "build me a knowledge cluster on Y", "go deep on Z with sources". VERY EXPENSIVE — for a quick question use `retrieve`, not this. Runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it needs host-native WebSearch/WebFetch plus Read/Glob/Grep/Write/Edit, and (optionally) Mathpix HTTP OCR for PDFs/images.
 ---
 
 # Loom — Deep Research (portable skill)
@@ -14,7 +14,7 @@ non-Claude host such as
 
 This skill is **expensive**: it fans out across many sources and writes a whole cluster.
 Run it only when the user actually wants a deep, durable knowledge cluster — not for a
-quick question (use `retrieve`) or a light writeup (use `research`).
+quick question (use `retrieve`) or a light writeup (Loom's `research` mode).
 
 ## Required tools
 

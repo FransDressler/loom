@@ -1,6 +1,6 @@
 ---
 name: wiki
-description: Integrate an existing cluster of source notes into a concept wiki — host-agnostic, no new research. Reads the source notes already sitting in a cluster folder (those with a source_url frontmatter), plans the cross-cutting concepts, writes one encyclopedia-style concept note per concept into per-theme subfolders, then builds/refreshes the Hub/MOC. Runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it only needs Read/Glob/Grep/Write/Edit. NEVER researches the web.
+description: Integrate an existing cluster of source notes into a concept wiki — host-agnostic, no new research. Use whenever the user wants to turn a folder of source notes into a concept wiki, "integrate" or "synthesize" their sources, build concept notes plus a Hub/MOC from material they already have, or organize a research cluster — even if they don't say "wiki" (no source notes yet? reach for deep-research first). Reads the source notes already sitting in a cluster folder (those with a source_url frontmatter), plans the cross-cutting concepts, writes one encyclopedia-style concept note per concept into per-theme subfolders, then builds/refreshes the Hub/MOC. Runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it only needs Read/Glob/Grep/Write/Edit. NEVER researches the web.
 ---
 
 # Loom — Wiki Integration (portable skill)

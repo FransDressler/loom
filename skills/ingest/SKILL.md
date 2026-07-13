@@ -1,6 +1,6 @@
 ---
 name: ingest
-description: File documents dropped into ~/anvil-dump into a Loom/Obsidian vault — host-agnostic. For each settled file it OCRs the full text into raw/<slug>.quelle.md, writes one source note (source_url frontmatter, key findings, relevance), optionally folds it into the concept wiki, and moves the original to .processed/ (.failed/ on error) — never overwriting or deleting. Runs on ANY agent host (Claude Code, Hermes+Gemini, …); it needs Read/Glob/Grep/Write/Edit plus Bash for the queue moves, and Mathpix HTTP creds (or the `anvil-ingest` CLI) for PDF/image OCR.
+description: File documents dropped into ~/anvil-dump into a Loom/Obsidian vault — host-agnostic. For each settled file it OCRs the full text into raw/<slug>.quelle.md, writes one source note (source_url frontmatter, key findings, relevance), optionally folds it into the concept wiki, and moves the original to .processed/ (.failed/ on error) — never overwriting or deleting. Use whenever the user drops or adds documents (PDFs, scans, papers, screenshots) into the drop folder and wants them filed into the vault, says "ingest this", "process my dump folder", "OCR and file these", or points at a downloaded file to add — even if they don't say "ingest". Runs on ANY agent host (Claude Code, Hermes+Gemini, …); it needs Read/Glob/Grep/Write/Edit plus Bash for the queue moves, and Mathpix HTTP creds (or the `anvil-ingest` CLI) for PDF/image OCR.
 ---
 
 # Loom — Ingest (portable skill)
@@ -15,7 +15,9 @@ build wraps the same flow in a Claude Agent SDK session (`/loom:ingest` /
 ## Required tools
 
 - **`Read`, `Glob`, `Grep`** — host-native filesystem tools. You read inside the vault
-  root (the host's working directory) AND inside the drop folder `~/anvil-dump`.
+  root (the host's working directory) AND inside the drop folder `~/anvil-dump` (the
+  Claude-Code build reads this path from `LOOM_INGEST_DIR`; substitute your configured
+  path wherever `~/anvil-dump` appears below).
 - **`Write`, `Edit`** — host-native, scoped to the vault. You write the raw full-text
   file, the source note, and (optionally) concept/Hub notes. Never to the drop folder.
 - **`Bash`** — ONLY for the claim-by-move queue in the drop folder (`mv` between

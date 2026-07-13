@@ -8,9 +8,10 @@ Karteikarten aus dem Vault für: **$ARGUMENTS**
 
 ## Standardablauf
 
-1. **Erst Erreichbarkeit prüfen:** `mcp__loom__anki_status` — läuft Anki + AnkiConnect-Add-on, existiert das Ziel-Deck? Meldet das Tool ⚠️ (nicht erreichbar), dann STOPP und dem Nutzer das Setup nennen: Anki-Desktop starten und das **AnkiConnect-Add-on (Code 2055492159)** installieren (Extras → Add-ons → Add-ons herunterladen), dann Anki neu starten.
-2. **Karten bauen + pushen:** `mcp__loom__anki_generate` mit `topic=$ARGUMENTS`. Der Karten-Agent sucht die einschlägigen Notizen, schreibt atomare Karten (nur aus dem, was die Notizen hergeben — nichts erfunden) und legt sie via AnkiConnect im Deck an; danach stößt er den AnkiWeb-Sync an. Optional: `deck=` (eigenes/Sub-Deck wie `ANVIL::Skoliose`), `count=` (Karten-Obergrenze), `push=false` (nur als Tabelle zur Vorschau), `sync=false` (anlegen ohne Sync).
-3. **Zusammenfassen:** wie viele Karten angelegt (und wie viele als Dublette übersprungen) wurden, in welchem Deck, welche Unterthemen abgedeckt sind. War der Vault dünn zum Thema, sag es offen — kein vorgetäuschter Umfang.
+1. **Erst Erreichbarkeit prüfen:** `mcp__loom__anki_status` — läuft Anki + AnkiConnect-Add-on? Das Tool listet dabei auch **alle vorhandenen Decks**. Meldet es ⚠️ (nicht erreichbar), dann STOPP und dem Nutzer das Setup nennen: Anki-Desktop starten und das **AnkiConnect-Add-on (Code 2055492159)** installieren (Extras → Add-ons → Add-ons herunterladen), dann Anki neu starten.
+2. **Ziel-Deck wählen (fragen, nicht annehmen):** Hat der Nutzer schon ein Deck genannt (im Prompt/Kontext), nimm dieses. Sonst zeig ihm die Deck-Liste aus `anki_status` und **frag kurz, in welches Deck** die Karten sollen — er darf auch einen neuen Namen nennen, um ein frisches (Sub-)Deck anzulegen (Anki verschachtelt mit `::`, z. B. `ANVIL::Thermodynamik`). So trennt er verschiedene Themen sauber in eigene Decks statt alles auf einen Haufen zu werfen. Warte auf die Antwort, bevor du Karten baust.
+3. **Karten bauen + pushen:** `mcp__loom__anki_generate` mit `topic=$ARGUMENTS` und `deck=<gewähltes Deck>`. Der Karten-Agent sucht die einschlägigen Notizen, schreibt atomare Karten (nur aus dem, was die Notizen hergeben — nichts erfunden) und legt sie via AnkiConnect im gewählten Deck an; danach stößt er den AnkiWeb-Sync an. Optional: `count=` (Karten-Obergrenze), `push=false` (nur als Tabelle zur Vorschau), `sync=false` (anlegen ohne Sync).
+4. **Zusammenfassen:** wie viele Karten angelegt (und wie viele als Dublette übersprungen) wurden, in welchem Deck, welche Unterthemen abgedeckt sind. War der Vault dünn zum Thema, sag es offen — kein vorgetäuschter Umfang.
 
 ## Schon fertige Karten direkt einlegen
 

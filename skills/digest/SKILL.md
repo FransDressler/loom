@@ -1,6 +1,6 @@
 ---
 name: digest
-description: Rebuild a Loom/Obsidian vault's at-a-glance overview note — areas/MOCs, headline metrics, and a rolling "recently changed" list — host-agnostic and idempotent. Runs on ANY agent host (Claude Code, Hermes+Gemini, …); needs only host-native Read/Glob/Grep/Write/Edit, no LLM-provider-specific tooling.
+description: Rebuild a Loom/Obsidian vault's at-a-glance overview note — areas/MOCs, headline metrics, and a rolling "recently changed" list — host-agnostic and idempotent. Use whenever the user wants an overview or dashboard of their vault, asks what changed recently, wants the areas/MOCs and headline numbers on one page, or says the overview note is stale — even if they don't say "digest". Runs on ANY agent host (Claude Code, Hermes+Gemini, …); needs only host-native Read/Glob/Grep/Write/Edit, no LLM-provider-specific tooling.
 ---
 
 # Loom — Digest (portable skill)
@@ -13,7 +13,7 @@ what you install into a non-Claude host such as
 
 The note you build is the vault's single overview page — its "state of the wiki on one
 screen". By default it lives at `ANVIL — Digest.md` in the vault root (the
-Claude-Code build reads this from `config.DIGEST_FILE` / `ANVIL_DIGEST_FILE`).
+Claude-Code build reads this filename from `LOOM_DIGEST_FILE`).
 
 ## Required tools
 
@@ -42,7 +42,7 @@ default vault). Be short and current — this is a dashboard, not an essay.
    exact-to-the-note; ballpark figures that orient the reader are the goal.
 
 3. **FIND recent changes** — determine the notes changed inside the recent window
-   (default **7 days**; the Claude-Code build reads this from `ANVIL_DIGEST_RECENT_DAYS`).
+   (default **7 days**; the Claude-Code build reads this from `LOOM_DIGEST_RECENT_DAYS`).
    Use the host's filesystem metadata (modification time) via Glob/Bash-equivalent to
    list recently modified `*.md` under the vault, newest first, EXCLUDING protected and
    read-only dirs (see Hard limits). Cap the list (~25 notes) so one big research run

@@ -1,6 +1,6 @@
 ---
 name: builder
-description: Works ONE complaint from Loom's builder-inbox — claims it by moving the file todo/ → working/, then revises and extends the affected vault notes from material the vault ALREADY holds, and archives the entry to done/. Host-agnostic: runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it needs only Read/Glob/Grep/Write/Edit plus Bash for the queue moves. No Claude required.
+description: Works ONE complaint from Loom's builder-inbox — claims it by moving the file todo/ → working/, then revises and extends the affected vault notes from material the vault ALREADY holds, and archives the entry to done/. Use when the user wants to work down the builder-inbox, process or resolve a filed complaint or vault gap, or says "work the inbox" / "handle the complaints" / "action the todo queue" — one entry per run. Host-agnostic — runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it needs only Read/Glob/Grep/Write/Edit plus Bash for the queue moves. No Claude required.
 ---
 
 # Loom — Builder (portable skill)

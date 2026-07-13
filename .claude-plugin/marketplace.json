@@ -10,7 +10,7 @@
     {
       "name": "loom",
       "source": "./plugin",
-      "description": "Loom-Features als /loom:* Commands (init, ingest, digest, wiki, retrieve, deep-research, builder, fitness, cleaner, anki) plus der gebündelte MCP-Server (mcp__anvil__*).",
+      "description": "Loom-Features als /loom:* Commands (init, ingest, digest, wiki, retrieve, deep-research, graft, builder, fitness, cleaner, anki, tutor, checkpoint) plus der gebündelte MCP-Server (mcp__anvil__*).",
       "version": "0.1.0",
       "category": "knowledge"
     }

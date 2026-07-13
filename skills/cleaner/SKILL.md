@@ -1,6 +1,6 @@
 ---
 name: cleaner
-description: Declutter and garden a Loom/Obsidian vault — host-agnostic. Runs the deterministic consistency report (cheap entry point), repairs links + frontmatter non-destructively, then proposes clutter (empty, duplicate, orphan, weakly-linked, too-short notes) and only AFTER explicit confirmation moves them to .trash/ — never a hard delete. Runs on ANY agent host (Claude Code, Hermes+Gemini, …): it needs Read/Glob/Grep/Edit, one Bash move into .trash/, and Loom's `lint` MCP tool.
+description: Declutter and garden a Loom/Obsidian vault — host-agnostic. Use whenever the user wants to tidy, declutter, garden or clean up their vault, fix broken links, find orphan/empty/duplicate/stub notes, or asks for a vault health or consistency check — even if they don't say "cleaner". Runs the deterministic consistency report (cheap entry point), repairs links + frontmatter non-destructively, then proposes clutter (empty, duplicate, orphan, weakly-linked, too-short notes) and only AFTER explicit confirmation moves them to .trash/ — never a hard delete. Runs on ANY agent host (Claude Code, Hermes+Gemini, …) — it needs Read/Glob/Grep/Edit, one Bash move into .trash/, and Loom's `lint` MCP tool.
 ---
 
 # Loom — Cleaner (portable skill)
@@ -20,6 +20,9 @@ build wraps the fuller version in a Claude Agent SDK session (`anvil-cleaner` /
   dangling citations and orphans WITHOUT changing anything. Wire the Loom MCP server into
   your host: `uv run --directory /path/to/loom anvil-mcp`. (Call it WITHOUT `checks_only`
   only on a Claude-Code host — that triggers the deeper agent pass; see the note below.)
+  If `lint` isn't wired into your host at all, skip step 1 and gather the same signals
+  (broken links, orphans, empty/duplicate/stub notes) yourself with Glob/Grep — you lose
+  only the cheap deterministic pre-scan, not the ability to run.
 - **`Read`, `Glob`, `Grep`** — host-native filesystem tools, scoped to the vault root.
 - **`Edit`** — for the non-destructive garden/repair step (links + frontmatter only).
 - **`Bash`** — used ONLY to move a confirmed clutter note into `<vault>/.trash/`
