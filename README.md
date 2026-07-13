@@ -33,8 +33,8 @@ things set it apart (and, as far as a survey of ~25 comparable projects found, t
    and claim-by-move queues *inside the vault*. You can read the agent network like a
    log, replay it, and audit it — there is no opaque message broker.
 3. **One brain, every life-domain, every channel.** Fitness (Oura + Strava → a daily
-   training plan), calendar, kanban, a Feynman learning mode, and Anki card
-   generation — all driven from chat (with voice notes), all guarded by a
+   training plan), calendar, kanban, an interactive tutor + a Feynman learning mode,
+   and Anki card generation — all driven from chat (with voice notes), all guarded by a
    *propose-and-confirm + .trash recovery* safety model.
 
 **Honest positioning:** the individual building blocks — cited RAG, Karpathy-style
@@ -105,6 +105,7 @@ LLM host (Hermes + Gemini, …) can run against Loom's MCP server — no Claude 
 | [`wiki`](skills/wiki/SKILL.md) | source notes → concept wiki | — (sequential, not parallel) |
 | [`deep-research`](skills/deep-research/SKILL.md) | topic → linked cluster | host WebSearch/WebFetch; Mathpix OCR |
 | [`ingest`](skills/ingest/SKILL.md) | drop folder → vault | Mathpix OCR (HTTP/curl or `loom-ingest`) |
+| [`checkpoint`](skills/checkpoint/SKILL.md) | discussion → checkpoint + wiki | the `wiki` skill/tool (MCP/CLI) |
 
 The Claude-Code build accelerates the heavy ones (`wiki`, `deep-research`, `ingest`)
 with Python-parallel multi-agent fan-out; the portable recipes do the same work
@@ -145,21 +146,33 @@ real environment variable always wins. Every feature below is off until you enab
 
 ### In Claude Code (plugin + MCP server)
 
-The repo doubles as a Claude Code plugin named `loom`:
+The repo doubles as a Claude Code plugin named `loom`. Install it straight from
+GitHub — no clone needed:
 
 ```bash
-claude plugin marketplace add .
+claude plugin marketplace add FransDressler/loom
 claude plugin install loom@loom
 ```
 
-…then call `/loom:retrieve`, `/loom:deep-research`, `/loom:fitness`, `/loom:anki`, etc.
-Or register just the bundled MCP server:
+(Working in a local checkout instead? `claude plugin marketplace add .` registers the
+clone you're in.) …then call `/loom:retrieve`, `/loom:deep-research`, `/loom:fitness`,
+`/loom:anki`, etc. The most reliable way to get the tools regardless of install path is
+to register the bundled MCP server explicitly against your local checkout:
 
 ```bash
 claude mcp add -s user loom -- uv run --directory /path/to/loom loom-mcp
 ```
 
 Details in [docs/claude-code-plugin.md](docs/claude-code-plugin.md).
+
+### In the Claude desktop app (claude.ai)
+
+The native desktop app has no plugins or `/loom:*` commands, but it can load Loom's
+bundled **MCP server** (giving you the `mcp__loom__*` tools) and its **skills**. See
+[docs/claude-desktop.md](docs/claude-desktop.md) for the `claude_desktop_config.json`
+snippet and requirements — the server runs locally over stdio, so the app must be on
+the same machine as the repo and vault. (The desktop app is macOS/Windows only; on
+Linux, use Claude Code above.)
 
 ---
 
@@ -206,6 +219,28 @@ vault and captioned. Without Mathpix credentials, research still runs text-only.
 | `LOOM_RESEARCH_MAX_TURNS` | Turn budget per research run (default: 80) |
 | `LOOM_RESEARCH_MAX_PDFS` | Cap on documents OCR'd per run (default: 10) |
 
+### Graft a missing concept (targeted gap-fill)
+
+`/loom:graft` is the **surgical counterpart to deep-research**: instead of building a
+whole new cluster, you name ONE thing that's missing — an equation, a diagram, a concept —
+and it pulls that single source from the web **with its real figures**, OCRs the diagrams'
+math via Mathpix, files it into the **existing cluster it belongs to** (asking you when the
+target is ambiguous), and runs the wiki builder to weave in the links and embed the
+diagram. Use it when a cluster is *almost* complete and you just want to fill a hole.
+
+```bash
+# usually driven by the /loom:graft skill, which picks sources + cluster and then calls:
+loom graft --url "https://de.wikipedia.org/wiki/Arrhenius-Gleichung" \
+           --into "wissen/werkstoffkunde" --title "Arrhenius-Gleichung"
+loom graft --url ".../skript.pdf" --into "wissen/werkstoffkunde" --kind pdf
+```
+
+`loom graft` is the deterministic half — it reuses the deep-research fetch/OCR/figure
+pipeline to write `<cluster>/raw/<slug>.quelle.md` (real figures localized into
+`attachments/`, math-bearing diagrams Mathpix-OCR'd inline). The `/loom:graft` skill then
+writes the source note in its own words and delegates the concept notes + Hub to
+`/loom:wiki`. Narrow by design (1–3 sources); a broad topic is deep-research's job.
+
 ### Adaptive retrieval + builder-inbox
 
 A dedicated **retrieval agent** answers a question by deciding how many notes
@@ -248,6 +283,50 @@ are skipped, so re-running a topic never spams.
 loom-anki --status                     # is AnkiConnect reachable? decks?
 loom-anki --generate "Scoliosis training" --deck "Med::Scoliosis"
 loom-anki --generate "Topic" --no-push  # dry run: print the cards as a table
+```
+
+### Tutor mode (interactive)
+
+`/loom:tutor` (or the `tutor` MCP tool) is an interactive one-on-one tutor over **one
+subject cluster** of your vault. Where retrieval *answers* and Feynman mode *examines*,
+the tutor **leads** the lesson with real pedagogy — Socratic guidance, scaffolding in
+the zone of proximal development, worked→faded examples, active recall, a hint ladder,
+and immediate feedback grounded in the cluster's notes and cited as `[[note]]`. It is
+read-only on the vault except for one per-subject **learner-model** note
+(`lernsessions/Lernstand — <subject>.md`) it maintains itself, so every fresh session
+opens at your current edge and revisits old weak spots.
+
+You talk to it turn by turn from Claude Code: each call is one turn of a persistent,
+resumable session (memory survives across turns and even a server restart, within
+`LOOM_TUTOR_SESSION_GAP_H`, default 8 h). Every session is written up as a chat protocol
+`lernsessions/tutor-<subject>-<date>.md`. At session end it points you to its sibling
+modes — a **Feynman** explain-back to consolidate a gap, **Anki** cards for retention —
+without doing their work. It never edits your knowledge notes.
+
+```
+/loom:tutor AQC | Ich will Adiabatensatz und Verschränkung verstehen
+```
+
+### Checkpoint & resume (discussion → wiki)
+
+`/loom:checkpoint` closes the loop between a *throwaway chat* and the *durable vault*.
+After a long session on a topic — a `/loom:deep-research` run plus the follow-up
+back-and-forth where the real understanding actually forms — it does two things at once:
+it **checkpoints** the discussion (a re-entry note under `diskussionen/` with the current
+state, the open threads, the decisions, and a cold-start prompt to pick up later), and it
+**lifts the knowledge into the wiki** (it distils the discussion into source note(s) in a
+`wissen/<slug>/` cluster, then hands off to the existing `wiki` pipeline to build the
+concept notes + Hub — no wiki logic duplicated).
+
+Unlike `retrieve`/`tutor`/`wiki`, which run as isolated agents over vault *files*, this one
+runs **in the main session** — its input is the live conversation only the host can see, so
+it has no `mcp__loom__*` tool and *is* the slash command. Come back any time with
+`--resume`, which reloads the checkpoint note plus its linked Hub/concepts and continues the
+discussion where you left it.
+
+```
+/loom:checkpoint deepfakes            # capture: checkpoint + build the wiki
+/loom:checkpoint --resume deepfakes   # later: reload and pick the discussion back up
 ```
 
 ### Dynamic context management
