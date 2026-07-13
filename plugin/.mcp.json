@@ -2,7 +2,7 @@
   "mcpServers": {
     "loom": {
       "command": "uv",
-      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/..", "loom-mcp"],
+      "args": ["tool", "run", "--from", "git+https://github.com/FransDressler/loom.git", "loom-mcp"],
       "env": {}
     }
   }
