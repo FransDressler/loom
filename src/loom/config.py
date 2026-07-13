@@ -679,6 +679,27 @@ FEYNMAN_WHISPER_COMPUTE: str = os.environ.get("LOOM_FEYNMAN_WHISPER_COMPUTE", "a
 FEYNMAN_LANG: str = os.environ.get("LOOM_FEYNMAN_LANG", "de")
 
 
+# --- Tutor-Lernmodus (mcp__loom__tutor) ----------------------------------------
+# An interactive one-on-one tutor over ONE vault cluster: it LEADS the lesson
+# (Socratic questions, scaffolding, worked examples) where Feynman only examines.
+# You talk to it turn by turn from Claude Code; each turn resumes a persistent SDK
+# session (memory). The session machinery is shared with feynman.py; what's new is
+# the per-subject LEARNER MODEL note the tutor maintains so a fresh session opens at
+# the user's current edge. Protocols + learner models live under TUTOR_SESSION_FOLDER.
+# The subject-context cap is shared with Feynman (FEYNMAN_CONTEXT_MAX_CHARS).
+TUTOR_SESSION_FOLDER: str = os.environ.get("LOOM_TUTOR_SESSION_FOLDER", "lernsessions")
+# Default subject (cluster folder) for a turn that names none when no single session
+# is already open. Empty => the caller must pass a subject on the first turn.
+TUTOR_SUBJECT: str = os.environ.get("LOOM_TUTOR_SUBJECT", "")
+# Model for the tutor agent. None => RETRIEVE_MODEL => RESEARCH_MODEL => default.
+TUTOR_MODEL: str | None = os.environ.get("LOOM_TUTOR_MODEL") or None
+# Turn budget per turn (the tutor mostly works from its injected context block).
+TUTOR_MAX_TURNS: int = int(os.environ.get("LOOM_TUTOR_MAX_TURNS", "30"))
+# Turns closer together than this (hours) continue the SAME session (memory via SDK
+# resume); a longer gap opens a fresh session + protocol, seeded by the learner model.
+TUTOR_SESSION_GAP_H: int = int(os.environ.get("LOOM_TUTOR_SESSION_GAP_H", "8"))
+
+
 # --- Fitness: Oura-Ring + Strava → Tagestrainingsplan ---------------------------
 # A daily coach: a timer job (`loom-fitness --daily`) syncs Oura (readiness, sleep,
 # HRV) and Strava (workouts) into a local SQLite store, computes training-load
@@ -746,6 +767,36 @@ FITNESS_FTP: int = int(os.environ.get("LOOM_FITNESS_FTP", "0"))
 FITNESS_MODEL: str | None = os.environ.get("LOOM_FITNESS_MODEL") or None
 FITNESS_PLAN_MAX_TURNS: int = int(os.environ.get("LOOM_FITNESS_PLAN_MAX_TURNS", "30"))
 FITNESS_ANALYZE_MAX_TURNS: int = int(os.environ.get("LOOM_FITNESS_ANALYZE_MAX_TURNS", "25"))
+
+
+# --- Spotify: abspielen, Playlists, DJ-Emulation + Musik-Präferenzen -------------
+# Play/pause/skip, Playlists lesen/erstellen/bearbeiten, Suche und eine LLM-kuratierte
+# DJ-Queue — über die Spotify Web API im gebündelten loom-mcp-Server. OFF, bis eine
+# Spotify-App konfiguriert UND `loom-spotify --auth` einmal gelaufen ist.
+#
+# Setup: OAuth2-App auf https://developer.spotify.com/dashboard anlegen, Redirect-URI
+# http://127.0.0.1:<SPOTIFY_OAUTH_PORT>/callback eintragen (Spotify verbietet seit
+# 2025 »localhost« — es MUSS die Loopback-IP sein). ACHTUNG (Feb 2026): Playback UND
+# der Dev-Mode selbst brauchen Spotify Premium; der eigene Account muss in der
+# App-User-Allowlist stehen (max. 5 Nutzer).
+SPOTIFY_CLIENT_ID: str = os.environ.get("LOOM_SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET: str = os.environ.get("LOOM_SPOTIFY_CLIENT_SECRET", "")
+SPOTIFY_API_URL: str = os.environ.get("LOOM_SPOTIFY_API_URL", "https://api.spotify.com/v1")
+SPOTIFY_AUTH_URL: str = os.environ.get("LOOM_SPOTIFY_AUTH_URL", "https://accounts.spotify.com/authorize")
+SPOTIFY_TOKEN_URL: str = os.environ.get("LOOM_SPOTIFY_TOKEN_URL", "https://accounts.spotify.com/api/token")
+SPOTIFY_TIMEOUT: int = int(os.environ.get("LOOM_SPOTIFY_TIMEOUT", "30"))
+# Local port for the one-time OAuth callback. Own port (not the fitness one) so both
+# redirect URIs can be registered independently. Redirect host is fixed to 127.0.0.1.
+SPOTIFY_OAUTH_PORT: int = int(os.environ.get("LOOM_SPOTIFY_OAUTH_PORT", "8888"))
+# Optional ISO-3166-1 market for search/play relinking. Empty => derive from the
+# user's account (the API's "from_token" behaviour when the param is omitted).
+SPOTIFY_MARKET: str = os.environ.get("LOOM_SPOTIFY_MARKET", "")
+# Vault folder holding the self-maintained music-taste notes (profile + favourite
+# songs). Normal notes (NOT the budgeted memory surface), auto-updated by the music
+# tools and the nightly consolidator. Relative to the vault root.
+MUSIC_DIR: str = os.environ.get("LOOM_MUSIC_DIR", "musik")
+MUSIC_PROFILE_FILE: str = os.environ.get("LOOM_MUSIC_PROFILE_FILE", "Musikgeschmack — Profil.md")
+MUSIC_FAVORITES_FILE: str = os.environ.get("LOOM_MUSIC_FAVORITES_FILE", "Lieblingssongs.md")
 # Morning window: --daily generates the plan only from this hour on, and waits for
 # fresh Oura readiness (which appears after you open the Oura app) until the
 # fallback hour — from then on it plans with the last known state + a notice.

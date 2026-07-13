@@ -116,6 +116,12 @@ was du jetzt nicht destillierst, ist beim nächsten Lauf möglicherweise weg.
    Nutzers und erkennbarer Frust sind First-Class-Signale für diese Flächen:
    «merk dir das», «hör auf mit X» oder dieselbe Sache zum wiederholten Mal
    korrigiert wiegt schwerer als jedes nebenbei erwähnte Faktum.
+   MUSIK: Musikbezogene Präferenzen NICHT in die budgetierte Profil-Fläche, sondern
+   in den Musik-Ordner: erwähnte Lieblingssongs nach
+   »{config.MUSIC_DIR}/{config.MUSIC_FAVORITES_FILE}«, Geschmack/Genres/Moods/
+   Abneigungen nach »{config.MUSIC_DIR}/{config.MUSIC_PROFILE_FILE}« (beide sind
+   normale, NICHT budgetierte Notizen — dort strukturiert einsortieren statt nur
+   ans Log anhängen). In der Profil-Fläche steht dafür nur der Verweis.
 3. CHECKPOINTS — Für erkennbar LAUFENDE Arbeitsfäden `ops/checkpoints/<faden>.md`
    anlegen/aktualisieren (~2000 Zeichen, `stand:`-Datum): aktueller Stand, offene
    Fäden, nächste Schritte. Die letzte UNERFÜLLTE Nutzer-Eingabe hältst du WÖRTLICH
@@ -138,7 +144,7 @@ was du jetzt nicht destillierst, ist beim nächsten Lauf möglicherweise weg.
 - Bei Widerspruch zwischen Verlauf und bestehender Notiz gilt die NOTIZ; vermerke
   die Diskrepanz im Bericht unter «Diskrepanzen».
 - Du LÖSCHST nichts. Du fasst nur an: `conversations/`, die zwei Gedächtnis-Flächen,
-  `ops/checkpoints/` und den Bericht.
+  den Musik-Ordner `{config.MUSIC_DIR}/`, `ops/checkpoints/` und den Bericht.
 - {mode}
 
 # Verläufe

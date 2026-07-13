@@ -104,14 +104,20 @@ def run_loopback_auth(
     port_env: str,
     app_label: str = "ANVIL",
     timeout_s: int = 300,
+    host: str = "localhost",
 ) -> dict:
     """Ein kompletter einmaliger OAuth-Roundtrip; gibt das Tokens-dict zurück.
 
     `build_authorize_url(redirect_uri, state)` baut die Browser-URL des Dienstes,
     `exchange_code(code, redirect_uri)` tauscht den gefangenen Code. Persistiert
     wird NICHT hier — der Aufrufer speichert das Ergebnis (save_tokens).
+
+    `host` steuert nur den Host der Redirect-URI (Standard »localhost«). Spotify
+    verbietet »localhost« und verlangt die Loopback-IP — dann `host="127.0.0.1"`
+    übergeben. Der lokale Listener bindet ohnehin 127.0.0.1, beide Hosts landen
+    also am selben Callback.
     """
-    redirect = f"http://localhost:{port}/callback"
+    redirect = f"http://{host}:{port}/callback"
     state = secrets.token_urlsafe(16)  # CSRF-Nonce — der Listener prüft den Roundtrip
     url = build_authorize_url(redirect, state)
     # Häufigste Fehlerquelle: »invalid_request«/400 auf der Consent-Seite = die

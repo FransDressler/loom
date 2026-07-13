@@ -678,6 +678,179 @@ async def anki_sync() -> str:
     return "✅ AnkiWeb-Sync angestoßen."
 
 
+# Tutor (interactive one-on-one tutor over ONE vault cluster): lazily imported so
+# the server starts fine regardless. A persistent per-subject session lives in the
+# tutor module for the server's lifetime; each call here is one turn.
+
+@mcp.tool()
+async def tutor(message: str, subject: str = "", new: bool = False) -> str:
+    """Interactive one-on-one tutor over ONE vault subject cluster — pedagogy, not Q&A.
+
+    Unlike `retrieve` (one-shot recall) this is a MULTI-TURN lesson WITH MEMORY: the tutor
+    diagnoses where the user is, scaffolds, asks Socratic questions and gives worked
+    examples, all grounded in the subject's cluster (Hub + concept + source notes) and
+    cited as [[note]]. Call it once per turn — pass the user's latest message as `message`
+    and the subject (a vault cluster folder, e.g. "AQC") as `subject`. `subject` may be
+    omitted on later turns of the same session. `new=True` starts a fresh session (ignores
+    a resumable one). Read-only on the vault except its own per-subject learner-model note;
+    it never edits your knowledge. Distinct from FEYNMAN (you explain, it examines) and Anki
+    (cards) — at session end it points you to those without doing their work. Relay the
+    returned text to the user verbatim and pass their reply back as the next `message`."""
+    from .tutor import TutorError, run_tutor_turn
+    try:
+        return await run_tutor_turn(message, subject=subject or None, new=new)
+    except TutorError as exc:
+        return f"⚠️ {exc}"
+
+
+@mcp.tool()
+async def tutor_status() -> str:
+    """Read-only tutor status: which subject sessions are open and which learner models
+    exist in the vault. Cheap, no agent run."""
+    from .tutor import status_text
+    return await asyncio.to_thread(status_text)
+
+
+# Spotify / Music (playback, playlists, DJ-emulation + taste notes via the Spotify
+# Web API): lazily imported so the server starts fine while Spotify isn't configured
+# or authed. Playback is remote-control of an active Spotify Connect device; the
+# tools auto-transfer to the active-or-first device. All read/write tools return a
+# plain string (errors as a ⚠️ line) — no exceptions cross the tool boundary.
+
+@mcp.tool()
+async def spotify_status() -> str:
+    """Spotify link status: connected account + product (premium/free), active device and
+    current track. Read-only, cheap. Call first; if it says 'nicht verbunden', the user runs
+    `loom-spotify --auth` once. Playback needs Premium."""
+    from .music import status_text
+    return await asyncio.to_thread(status_text)
+
+
+@mcp.tool()
+async def spotify_devices() -> str:
+    """List available Spotify Connect devices (id, name, type, active, volume). Read-only.
+    Playback needs an active device — if none is listed, tell the user to open the Spotify app."""
+    from .music import devices_text
+    return await asyncio.to_thread(devices_text)
+
+
+@mcp.tool()
+async def spotify_play(query: str = "", uri: str = "", device: str = "") -> str:
+    """Start playback on a Spotify Connect device (auto-transfers to the active-or-first device).
+    Give `query` to search+play a track by fuzzy name ("Bohemian Rhapsody Queen"), or `uri` to play
+    an exact track/album/playlist/artist (spotify:track:… / spotify:album:… / spotify:playlist:… /
+    spotify:artist:…). Neither => resume. Optional `device` (name or id) targets a specific device."""
+    from .music import play_text
+    return await asyncio.to_thread(play_text, query, uri, device)
+
+
+@mcp.tool()
+async def spotify_pause() -> str:
+    """Pause playback on the active device."""
+    from .music import pause_text
+    return await asyncio.to_thread(pause_text)
+
+
+@mcp.tool()
+async def spotify_next() -> str:
+    """Skip to the next track."""
+    from .music import next_text
+    return await asyncio.to_thread(next_text)
+
+
+@mcp.tool()
+async def spotify_previous() -> str:
+    """Skip to the previous track."""
+    from .music import previous_text
+    return await asyncio.to_thread(previous_text)
+
+
+@mcp.tool()
+async def spotify_queue(query: str = "", uri: str = "") -> str:
+    """Add ONE track to the playback queue — by `uri` (spotify:track:…) or fuzzy `query` name.
+    Needs an active device (auto-targets it)."""
+    from .music import queue_text
+    return await asyncio.to_thread(queue_text, query, uri)
+
+
+@mcp.tool()
+async def spotify_search(query: str, type: str = "track", limit: int = 10) -> str:
+    """Search the Spotify catalogue. `type` is comma-separated: track, album, artist, playlist.
+    `limit` max 10 (Spotify Dev-Mode cap). Read-only; returns compact results WITH URIs to feed
+    into spotify_play / spotify_queue / spotify_playlist_add."""
+    from .music import search_text
+    return await asyncio.to_thread(search_text, query, type, limit)
+
+
+@mcp.tool()
+async def spotify_playlists() -> str:
+    """List all of the user's playlists (name, id, track count, owner). Read-only. Use this to
+    find the right playlist id before reading or editing one — and to disambiguate a name."""
+    from .music import playlists_text
+    return await asyncio.to_thread(playlists_text)
+
+
+@mcp.tool()
+async def spotify_playlist_tracks(playlist: str) -> str:
+    """List the tracks of a playlist. `playlist` may be a name OR an id/URI. On an ambiguous name
+    the tool returns the matching candidates and asks you to re-call with the exact id."""
+    from .music import playlist_tracks_text
+    return await asyncio.to_thread(playlist_tracks_text, playlist)
+
+
+@mcp.tool()
+async def spotify_playlist_create(name: str, description: str = "", public: bool = False) -> str:
+    """Create a new playlist on the user's account (default private). Returns the new id + URL."""
+    from .music import playlist_create_text
+    return await asyncio.to_thread(playlist_create_text, name, description, public)
+
+
+@mcp.tool()
+async def spotify_playlist_add(playlist: str, tracks: str) -> str:
+    """Add tracks to a playlist. `playlist` = name or id; `tracks` = track URIs OR fuzzy
+    "name – artist" entries, ONE PER LINE (each resolved via search). Confirm the playlist
+    identity first if the name is ambiguous (the tool will tell you)."""
+    from .music import playlist_add_text
+    return await asyncio.to_thread(playlist_add_text, playlist, tracks)
+
+
+@mcp.tool()
+async def spotify_playlist_remove(playlist: str, tracks: str) -> str:
+    """Remove tracks from a playlist (destructive — confirm with the user first). `playlist` = name
+    or id; `tracks` = URIs or fuzzy names, ONE PER LINE."""
+    from .music import playlist_remove_text
+    return await asyncio.to_thread(playlist_remove_text, playlist, tracks)
+
+
+@mcp.tool()
+async def spotify_playlist_reorder(playlist: str, range_start: int, insert_before: int,
+                                   range_length: int = 1) -> str:
+    """Move a block of items within a playlist (0-based positions; destructive — confirm first).
+    Move `range_length` items starting at `range_start` to before `insert_before`."""
+    from .music import playlist_reorder_text
+    return await asyncio.to_thread(playlist_reorder_text, playlist, range_start, insert_before, range_length)
+
+
+@mcp.tool()
+async def spotify_dj(tracks: str, start: bool = True) -> str:
+    """DJ mode: queue a CURATED setlist you built from the user's taste (Spotify's real AI-DJ isn't
+    API-accessible, so YOU curate). Pass `tracks` as a JSON array of {"name","artist"} objects (read
+    the vault note `musik/Musikgeschmack — Profil.md` first to seed it), or a plain "name – artist"
+    list. Each is resolved via search; with start=True the first plays now and the rest fill the queue."""
+    from .music import dj_text
+    return await asyncio.to_thread(dj_text, tracks, start)
+
+
+@mcp.tool()
+async def music_remember(kind: str, detail: str) -> str:
+    """Record a MUSIC preference into the vault so it persists across sessions. kind='song' appends to
+    `musik/Lieblingssongs.md` (best-effort resolves the Spotify URI); kind='taste' or 'dislike' appends
+    to `musik/Musikgeschmack — Profil.md`. Call this whenever the user reveals a clear music preference
+    (a loved song/artist/genre, a mood/context, or something they dislike)."""
+    from .music import remember_text
+    return await asyncio.to_thread(remember_text, kind, detail)
+
+
 def main() -> None:
     """Run the server over stdio (the transport the Claude Code CLI speaks)."""
     mcp.run()
