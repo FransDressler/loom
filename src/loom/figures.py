@@ -23,7 +23,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from . import config
+from . import config, mathpix
 
 # Standard Markdown image: ![alt](url ...). Obsidian's ![[...]] embeds have no
 # parentheses and are intentionally left untouched.
@@ -48,6 +48,19 @@ _JUNK_RE = re.compile(
     r"|/ads?/|doubleclick|googlesyndication|/analytics|/tracking",
     re.IGNORECASE,
 )
+
+# Raster figure extensions Mathpix can OCR (SVG / vector / unknown types are skipped —
+# the /v3/text endpoint wants a bitmap). Maps each to the MIME `ocr_image` expects.
+_FIG_OCR_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
+    ".tif": "image/tiff", ".tiff": "image/tiff",
+}
+_OCR_TEXT_MAX = 600
+# A figure's OCR text is only kept when it actually carries a formula/label — a LaTeX
+# command, $…$, a sub/superscript, a math operator, or a Greek letter. Plain OCR of a
+# photo (no such signal) is dropped rather than clutter the note with noise.
+_MATH_HINT_RE = re.compile(r"\\[A-Za-z]+|[$^]|_\{|[=≈≤≥≠±×·÷√∑∏∫∂∇∞]|[α-ωΑ-Ω]")
 
 
 class FigureError(RuntimeError):
@@ -106,15 +119,58 @@ def describe(path: Path, model: str) -> str:
     return asyncio.run(_describe_async(str(path), model))
 
 
+def _looks_like_math(text: str) -> bool:
+    """True if OCR text carries a formula/label worth keeping (not a plain photo)."""
+    t = (text or "").strip()
+    return len(t) >= 3 and bool(_MATH_HINT_RE.search(t))
+
+
+def _ocr_figure(path: Path) -> str:
+    """Mathpix-OCR a stored raster figure; return its math/label text ('' if none).
+
+    Opt-in and best-effort (used by graft): no-op's when Mathpix is unconfigured or
+    the file is a vector/unknown type, and drops OCR text that carries no math signal.
+    Never raises — a failed OCR must never block a capture.
+    """
+    if not mathpix.is_configured():
+        return ""
+    mime = _FIG_OCR_MIME.get(path.suffix.lower())
+    if not mime:  # .svg and friends — /v3/text wants a bitmap
+        return ""
+    try:
+        text = mathpix.ocr_image(path.read_bytes(), mime)
+    except Exception:  # noqa: BLE001 — OCR is a nicety; keep the figure without it
+        return ""
+    text = " ".join((text or "").split())
+    return text[:_OCR_TEXT_MAX] if _looks_like_math(text) else ""
+
+
+def _render_figure(name: str, caption: str, assets_dir: Path, ocr_figures: bool) -> str:
+    """Embed + caption for one localized figure, plus an OCR blockquote when asked."""
+    out = f"![[{name}]]"
+    if caption:
+        out += f"\n*Abb.: {caption}*"
+    if ocr_figures:
+        formula = _ocr_figure(Path(assets_dir) / name)
+        if formula:
+            out += f"\n> **Aus der Abbildung (OCR):** {formula}"
+    return out
+
+
 def enrich_markdown(
     md: str,
     *,
     assets_dir: Path,
     model: str,
     max_images: int,
+    ocr_figures: bool = False,
     verbose: bool = False,
 ) -> str:
-    """Localize remote figures in `md` and append a Haiku-generated caption to each."""
+    """Localize remote figures in `md` and append a Haiku-generated caption to each.
+
+    With `ocr_figures`, each localized diagram is additionally Mathpix-OCR'd so its
+    formulas/labels land as searchable text under the embed (opt-in; used by graft).
+    """
     assets_dir = Path(assets_dir)
     done = 0
     seen: dict[str, str] = {}  # url -> replacement, so a repeated figure isn't re-fetched,
@@ -147,8 +203,7 @@ def enrich_markdown(
             if verbose:
                 print(f"figure caption failed: {exc}", flush=True)
             caption = ""
-        embed = f"![[{name}]]"
-        result = f"{embed}\n*Abb.: {caption}*" if caption else embed
+        result = _render_figure(name, caption, assets_dir, ocr_figures)
         seen[url] = result
         return result
 
@@ -162,6 +217,7 @@ def embed_local_figures(
     assets_dir: Path,
     model: str,
     max_images: int,
+    ocr_figures: bool = False,
     verbose: bool = False,
 ) -> str:
     """Localize Mathpix `md.zip` figures into the vault and caption each.
@@ -198,8 +254,7 @@ def embed_local_figures(
             if verbose:
                 print(f"figure caption failed: {exc}", flush=True)
             caption = ""
-        embed = f"![[{name}]]"
-        result = f"{embed}\n*Abb.: {caption}*" if caption else embed
+        result = _render_figure(name, caption, assets_dir, ocr_figures)
         seen[base] = result
         return result
 

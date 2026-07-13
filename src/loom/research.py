@@ -325,7 +325,7 @@ def _resolve_hub_name(folder: str, vault: str, fallback: str) -> str:
     return fallback
 
 
-def _store_raw_source(folder: str, slug: str, src: dict, vault: str) -> str | None:
+def _store_raw_source(folder: str, slug: str, src: dict, vault: str, *, ocr_figures: bool = False) -> str | None:
     """Fetch a source's full Markdown and store it as raw/<slug>.quelle.md.
 
     Reuses the same converters as the iMessage inbox: web pages/YouTube via
@@ -381,11 +381,13 @@ def _store_raw_source(folder: str, slug: str, src: dict, vault: str) -> str | No
                 md = figures.embed_local_figures(
                     md, figs, assets_dir=assets_dir,
                     model=config.DESCRIBE_MODEL, max_images=config.RESEARCH_DEEP_FIG_MAX,
+                    ocr_figures=ocr_figures,
                 )
             else:
                 md = figures.enrich_markdown(
                     md, assets_dir=assets_dir,
                     model=config.DESCRIBE_MODEL, max_images=config.RESEARCH_DEEP_FIG_MAX,
+                    ocr_figures=ocr_figures,
                 )
         except Exception:  # enrichment is best-effort; keep the raw markdown on failure
             pass

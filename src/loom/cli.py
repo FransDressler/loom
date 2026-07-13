@@ -20,6 +20,7 @@ from .research import (
     run_sync,
     run_wiki_integration,
 )
+from .eval import run_eval_cli
 from .retrieve import run_retrieve
 from .tasks import SKILLS, run_tasks_once, run_tasks_watch, submit_task
 
@@ -228,6 +229,22 @@ def main() -> None:
     )
     retrieve.add_argument("-v", "--verbose", action="store_true", help="Show tool activity and run stats.")
 
+    eval_p = sub.add_parser(
+        "eval",
+        help="Measure retrieve output quality — citation precision/recall + supersession — "
+        "on a corpus harvested for free from the builder-inbox. --dry-run is token-free.",
+    )
+    eval_p.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+    eval_p.add_argument(
+        "--model", default=config.RETRIEVE_MODEL,
+        help="Model override for the retrieve agent (default: LOOM_RETRIEVE_MODEL).",
+    )
+    eval_p.add_argument("--limit", type=int, default=None, metavar="N", help="Only the first N cases (saves tokens).")
+    eval_p.add_argument("--dry-run", action="store_true", help="Harvest and list the corpus; run nothing, spend nothing.")
+    eval_p.add_argument("--seeds", default=None, metavar="PATH", help="JSON supersession seeds [{id,query,stale,fresh}].")
+    eval_p.add_argument("--out", default=None, metavar="PATH", help="Write the report here (default: <vault>/<reports>/eval/).")
+    eval_p.add_argument("-v", "--verbose", action="store_true", help="Show each retrieve query.")
+
     hint = sub.add_parser(
         "context-hint",
         help="Claude Code UserPromptSubmit hook: read the hook JSON from stdin and print a "
@@ -278,6 +295,21 @@ def main() -> None:
     ingest.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
     ingest.add_argument("--model", default=config.RESEARCH_MODEL, help="Model override for the ingest agents.")
     ingest.add_argument("-v", "--verbose", action="store_true", help="Log activity to stderr.")
+
+    graft = sub.add_parser(
+        "graft",
+        help="Fetch ONE web/PDF source for a named concept into an EXISTING cluster's raw/ "
+        "layer (real figures localized, math-figures OCR'd). The graft skill then writes the "
+        "source note and runs the wiki builder over the cluster.",
+    )
+    graft.add_argument("--url", required=True, help="Source URL — a web page (Wikipedia &c.) or a PDF/image.")
+    graft.add_argument("--into", required=True, help="Target cluster folder, vault-relative (e.g. wissen/werkstoffkunde).")
+    graft.add_argument("--slug", default=None, help="Filename slug for the raw source (default: derived from --title/URL).")
+    graft.add_argument("--kind", choices=["web", "pdf"], default=None, help="Source kind (default: auto — .pdf ⇒ pdf, else web).")
+    graft.add_argument("--title", default=None, help="Human title of the source (used to derive the slug).")
+    graft.add_argument("--no-ocr-figures", dest="ocr_figures", action="store_false", help="Don't Mathpix-OCR the math out of the diagrams.")
+    graft.add_argument("--vault", default=config.VAULT_PATH, help="Path to the Obsidian vault.")
+    graft.set_defaults(ocr_figures=True)
 
     feynman = sub.add_parser(
         "feynman",
@@ -435,6 +467,12 @@ def main() -> None:
         asyncio.run(run_retrieve(" ".join(args.question), args.vault, args.model, args.verbose))
         return
 
+    if args.command == "eval":
+        raise SystemExit(run_eval_cli(
+            args.vault, args.model, limit=args.limit, seeds_path=args.seeds,
+            dry_run=args.dry_run, out_path=args.out, verbose=args.verbose,
+        ))
+
     if args.command == "context-hint":
         run_context_hint(args.vault, args.session)
         return
@@ -463,6 +501,14 @@ def main() -> None:
             n = asyncio.run(run_ingest_once(args.vault, args.model, verbose=args.verbose))
             print(f"{n} Datei(en) eingearbeitet.")
         return
+
+    if args.command == "graft":
+        from .graft import run_graft
+
+        raise SystemExit(run_graft(
+            args.url, args.into, args.vault,
+            slug=args.slug, kind=args.kind, title=args.title, ocr_figures=args.ocr_figures,
+        ))
 
     if args.command == "feynman":
         if args.watch:
