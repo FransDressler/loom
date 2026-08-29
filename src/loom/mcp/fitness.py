@@ -5,9 +5,9 @@ construction (the SQLite store is opened in ro mode), so no tool needs the
 confirm queue: plans/analyses are ordinary vault notes written by the coach
 agent itself, and deletions ride the cleaner's confirm flow like any note.
 
-The four tools are THIN wrappers — the actual query/format logic lives in
-`loom.fitness` (read_db, overview_text, activities_text, oura_docs_text,
-query_text), so the standalone Claude-Code server (`loom.mcp_server`) exposes
+The five tools are THIN wrappers — the actual query/format logic lives in
+`loom.fitness` (read_db, overview_text, week_text, activities_text,
+oura_docs_text, query_text), so the standalone Claude-Code server (`loom.mcp_server`) exposes
 the very same tools without a second, drifting implementation.
 
 Wired in two places with the SAME server name "fitness" (the mcp_servers dict
@@ -24,7 +24,9 @@ from . import Integration, _ok
 
 TOOL_NAMES = [
     "mcp__fitness__fitness_overview",
+    "mcp__fitness__fitness_week",
     "mcp__fitness__fitness_activities",
+    "mcp__fitness__fitness_lifts",
     "mcp__fitness__fitness_oura",
     "mcp__fitness__fitness_query",
 ]
@@ -41,6 +43,20 @@ async def fitness_overview(args: dict) -> dict:
     from .. import fitness
 
     return _ok(fitness.overview_text())
+
+
+@tool(
+    "fitness_week",
+    "Die LAUFENDE Kalenderwoche (Montag bis heute) als Soll-Ist-Grundlage: pro Tag das "
+    "geloggte Workout, Dauer, TSS und Readiness, dazu die Wochenbilanz gegen den Schnitt "
+    "der letzten vier Wochen, den Sportmix und die verbleibenden Tage. Nutze dies, um zu "
+    "sehen, was die Woche noch schuldet, bevor du eine Tagesempfehlung gibst.",
+    {"type": "object", "properties": {}, "required": []},
+)
+async def fitness_week(args: dict) -> dict:
+    from .. import fitness
+
+    return _ok(fitness.week_text())
 
 
 @tool(
@@ -62,6 +78,27 @@ async def fitness_activities(args: dict) -> dict:
 
     return _ok(fitness.activities_text(int(args.get("days") or 14), args.get("sport") or ""))
 
+
+@tool(
+    "fitness_lifts",
+    "Kraft-Historie mit geschätztem 1RM: pro Übung und Seite die letzte Serie, die beste "
+    "Serie des Fensters, das daraus geschätzte 1RM (Epley auf Wdh + RIR) und fertige "
+    "Lastvorschläge für 5/8/12 Wiederholungen. Quelle sind die »## 4 · Tracking — IST«-"
+    "Tabellen der datierten Plan-Notizen — Gym-Arbeit landet nicht in Strava. `exercise` "
+    "filtert per Teilstring (leer = alle Übungen).",
+    {
+        "type": "object",
+        "properties": {
+            "exercise": {"type": "string", "description": "Übungsname oder Teil davon, leer = alle."},
+            "days": {"type": "integer", "description": "Zeitfenster in Tagen (Default 180)."},
+        },
+        "required": [],
+    },
+)
+async def fitness_lifts(args: dict) -> dict:
+    from .. import fitness
+
+    return _ok(fitness.lifts_text(args.get("exercise") or "", int(args.get("days") or 180)))
 
 @tool(
     "fitness_oura",
@@ -88,7 +125,9 @@ async def fitness_oura(args: dict) -> dict:
     "Read-only-SQL (SELECT/WITH) gegen den Fitness-Store. Tabellen: activities (id, day, "
     "sport_type, name, distance_m, moving_time_s, average_heartrate, suffer_score, tss, …), "
     "oura_docs (collection, doc_id, day, raw_json), daily_load (day, tss, ctl, atl, tsb), "
-    "athlete (key, value); View weekly_volume (week, sport_type, n, hours, km, tss). "
+    "strength_sets (day, exercise, exercise_raw, side, set_no, weight_kg, bodyweight, reps, "
+    "seconds, rir, source), athlete (key, value); View weekly_volume (week, sport_type, n, "
+    "hours, km, tss). "
     "Für Auswertungen, die fitness_overview/fitness_activities nicht abdecken. "
     "Beginnt das Ergebnis mit ⚠️, ist die Query FEHLGESCHLAGEN (keine leere Ergebnismenge) — "
     "dann korrigieren oder dem Nutzer melden, nicht als Daten weiterverwenden.",
@@ -112,6 +151,7 @@ def build() -> Integration | None:
         return None
     server = create_sdk_mcp_server(
         "fitness",
-        tools=[fitness_overview, fitness_activities, fitness_oura, fitness_query],
+        tools=[fitness_overview, fitness_week, fitness_activities, fitness_lifts,
+               fitness_oura, fitness_query],
     )
     return Integration(server=server, tool_names=list(TOOL_NAMES))

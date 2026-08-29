@@ -18,20 +18,35 @@ Es bündelt zwei Dinge:
 2. **MCP-Server** (`.mcp.json` im Plugin-Root) — startet den
    vorhandenen Standalone-Server (`anvil.mcp_server`, FastMCP-Name `anvil`, stdio).
 
-### Warum Commands und nicht Skills
+### Commands UND Skills (Stand 2026-08-29)
 
-Claude Code listet die beiden Plugin-Bausteine unterschiedlich:
+Claude Code listet die beiden Plugin-Bausteine so:
 
 - **Commands** erscheinen mit Namespace: `/loom:ingest`, `/loom:wiki` … —
-  genau das gewünschte, gruppierbare Format (tippe `/loom` → alle Loom-Features).
-  Sie werden **explizit** vom Nutzer per Slash ausgelöst.
-- **Skills** (`skills/<name>/SKILL.md`) erscheinen dagegen als `/<name>` mit dem
-  Plugin nur als Klammer-Quelltag `(anvil)` — **ohne** `anvil:`-Präfix, und das
-  Modell kann sie automatisch ziehen.
+  gruppierbar (tippe `/loom` → alle Loom-Features), **explizit** per Slash
+  ausgelöst.
+- **Skills** (`skills/<name>/SKILL.md`) erscheinen als `loom:<name>` — ebenfalls
+  mit Plugin-Präfix — und das Modell kann sie **selbst** ziehen, wenn die
+  `description` auf die Aufgabe passt.
 
-Da das `/loom:`-Präfix gewünscht ist (Unterscheidung von eigenen Skills) und
-explizite Kontrolle bei teuren Läufen (`deep-research`, `ingest`) ohnehin
-sinnvoller ist als automatisches Auslösen, sind die Features **Commands**.
+Ursprünglich waren die Features **nur** Commands, mit zwei Begründungen. Die erste
+(»Skills erscheinen ohne Plugin-Präfix«) gilt nicht mehr: andere Plugins listen
+heute als `caveman:caveman`, `fiction:go`, `everything-claude-code:code-review`.
+Die zweite (explizite Kontrolle bei teuren Läufen) gilt weiter — deshalb bleiben
+die Commands, und die Skills kommen **zusätzlich** dazu:
+
+- `/loom:deep-research`, `/loom:ingest`, `/loom:wiki`, `/loom:graft` willst du
+  bewusst per Slash starten, nicht durch eine beiläufige Formulierung auslösen.
+- `loom:fitness`, `loom:retrieve`, `loom:music` dürfen dagegen gern automatisch
+  greifen, wenn du nach dem Tagesplan oder einer Vault-Stelle fragst.
+
+Die Skill-Rezepte sind ohnehin **host-agnostisch** geschrieben (sie laufen auch
+unter Hermes/Gemini, siehe [`hermes-integration.md`](hermes-integration.md)); sie
+im Plugin mitzuliefern kostet nichts extra. **Achtung bei Überschneidungen:** wo
+Command und Skill dasselbe Feature bedienen, beschreiben sie verschiedene Wege —
+`plugin/skills/fitness/SKILL.md` lässt den Host den Plan selbst schreiben und
+verbietet `fitness_plan`, während `/loom:fitness` genau dieses Tool aufruft. Beides
+ist für sich korrekt; verlass dich pro Lauf auf eines.
 
 ## Struktur
 
@@ -43,6 +58,10 @@ loom/                    # Repo = Marketplace-Root
     ├── .claude-plugin/
     │   └── plugin.json         # Manifest (Name, Version, Beschreibung)
     ├── .mcp.json               # gebündelter MCP-Server (anvil → .venv/bin/anvil-mcp)
+    ├── skills/                  # host-agnostische Rezepte, zugleich Claude-Code-Skills
+    │   ├── fitness/SKILL.md
+    │   ├── retrieve/SKILL.md
+    │   └── …
     └── commands/
         ├── ingest.md
         ├── digest.md
@@ -56,7 +75,9 @@ loom/                    # Repo = Marketplace-Root
 Das Plugin liegt bewusst im Unterordner `plugin/`: Marketplace-Installs kopieren
 das Plugin-Verzeichnis komplett in den Cache (`~/.claude/plugins/cache/`). Läge die
 `marketplace.json`-`source` auf `./` (Repo-Root), würden die **465 MB `.venv`** und
-`src/`/`tests/` mitkopiert. Mit `source: ./plugin` sind es ~28 KB.
+`src/`/`tests/` mitkopiert. Mit `source: ./plugin` sind es ein paar hundert KB —
+deshalb liegen auch die Skill-Rezepte unter `plugin/skills/` und nicht im Repo-Root:
+nur was unter `plugin/` liegt, landet im Cache und wird von Claude Code gefunden.
 
 Invoke-Name = `<plugin-name>:<command-datei>`, also `/loom:ingest` usw.
 (Der bundled MCP-Server heißt ebenfalls `anvil`, liegt aber in einem eigenen
@@ -72,7 +93,7 @@ Namespace — kein Konflikt mit dem Plugin-Namen.)
 | `/loom:retrieve` | MCP-Tool `mcp__loom__retrieve` | `retrieve` | leicht (read-only) |
 | `/loom:deep-research` | `anvil research "<topic>" --deep` | `research(deep=True)` | sehr schwer |
 | `/loom:builder` | `anvil builder` (ein Zyklus) | — (Queue-Mgmt via `complain`/`inbox_status`) | schwer |
-| `/loom:fitness` | MCP-Tools `fitness_sync` → `fitness_overview` → `fitness_plan` | `fitness_sync/overview/activities/oura/query/plan` | sync+lesen leicht, Plan mittel |
+| `/loom:fitness` | MCP-Tools `fitness_sync` → `fitness_overview`/`fitness_week` → `fitness_plan` | `fitness_sync/overview/week/activities/oura/query/plan` | sync+lesen leicht, Plan mittel |
 
 Leichte/lesende Commands (`retrieve`, `digest`, `wiki --status`) zeigen primär auf
 das MCP-Tool (läuft in-process, schnell). Schwere Läufe (`ingest`, `wiki`,
@@ -87,7 +108,7 @@ Minuten-/Credit-lange Läufe ungeeignet ist.
 projektweite `.mcp.json` nutzt). Exponiert: `retrieve`, `complain`, `inbox_status`,
 `loom_status`, `digest`, `lint`, `normalize`, `glossary`, `schema`, `sync`, `wiki`,
 `research`, `clean_preview`, `fitness_status/sync/plan` plus die read-only
-Fitness-Datenzugriffe `fitness_overview/activities/oura/query` (dieselbe Logik wie
+Fitness-Datenzugriffe `fitness_overview/week/activities/oura/query` (dieselbe Logik wie
 die SDK-internen `mcp__fitness__*`-Tools, aus `anvil.fitness` geteilt).
 
 Wichtig (empirisch verifiziert): ein `mcpServers`-Block **inline in `plugin.json`**

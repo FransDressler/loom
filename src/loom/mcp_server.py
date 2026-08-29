@@ -572,11 +572,15 @@ async def fitness_sync() -> str:
 
 
 @mcp.tool()
-async def fitness_plan() -> str:
+async def fitness_plan(note: str = "") -> str:
     """Write TODAY's training plan now (heavy: runs the coach agent, overwrites today's
-    plan note if present) and return the summary. Use when the user asks for a fresh plan."""
+    plan note if present) and return the summary. Use when the user asks for a fresh plan.
+    Pass `note` for what the athlete just said and no sensor knows — "finger healed",
+    "only 40 minutes today", "gym closed", "want strength work": the coach plans with it,
+    records it in the plan note and updates the affected vault note. It never lifts a lock
+    documented in the athlete/injury profile."""
     from .fitness import run_plan
-    summary = await run_plan(config.VAULT_PATH, None, force=True, push=False)
+    summary = await run_plan(config.VAULT_PATH, None, force=True, push=False, note=note)
     return summary or "Kein Plan erstellt — `loom-fitness --status` prüfen."
 
 
@@ -590,12 +594,33 @@ async def fitness_overview() -> str:
 
 
 @mcp.tool()
+async def fitness_week() -> str:
+    """The RUNNING calendar week (Mon→today) as a Soll-Ist basis: one row per day with the
+    logged workout, duration, TSS and readiness, plus the week's totals against the average
+    of the last four weeks, the sport mix and the days left. Cheap, read-only; use it to see
+    what the week still owes before recommending today's session."""
+    from .fitness import week_text
+    return await asyncio.to_thread(week_text)
+
+
+@mcp.tool()
 async def fitness_activities(days: int = 14, sport: str = "") -> str:
     """List Strava workouts of the last `days` days (default 14), optionally filtered to one
     sport (e.g. Run, Ride, WeightTraining). Read-only; per workout: date, name, duration,
     distance, heart rate, TSS and the Strava id."""
     from .fitness import activities_text
     return await asyncio.to_thread(activities_text, days, sport)
+
+
+@mcp.tool()
+async def fitness_lifts(exercise: str = "", days: int = 180) -> str:
+    """Strength history with an estimated 1RM, per exercise AND side: the last set, the best
+    set of the window, the e1RM (Epley on reps + RIR) and ready-made load suggestions for
+    5/8/12 reps. Source are the `## 4 · Tracking — IST` tables of the dated plan notes — gym
+    work never reaches Strava, so this is the only lift history there is. `exercise` filters
+    by substring (empty = all). Read-only."""
+    from .fitness import lifts_text
+    return await asyncio.to_thread(lifts_text, exercise, days)
 
 
 @mcp.tool()
@@ -612,7 +637,9 @@ async def fitness_query(sql: str) -> str:
     """Read-only SQL (SELECT/WITH only) against the fitness store. Tables: activities (id, day,
     sport_type, name, distance_m, moving_time_s, average_heartrate, suffer_score, tss, …),
     oura_docs (collection, doc_id, day, raw_json), daily_load (day, tss, ctl, atl, tsb),
-    athlete (key, value); view weekly_volume (week, sport_type, n, hours, km, tss). A result
+    strength_sets (day, exercise, exercise_raw, side, set_no, weight_kg, bodyweight, reps,
+    seconds, rir, source), athlete (key, value); view weekly_volume (week, sport_type, n,
+    hours, km, tss). A result
     starting with ⚠️ means the query FAILED (not an empty set) — fix it, don't use it as data."""
     from .fitness import query_text
     return await asyncio.to_thread(query_text, sql)

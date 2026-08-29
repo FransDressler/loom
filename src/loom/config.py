@@ -763,6 +763,15 @@ FITNESS_GOALS: str = os.environ.get("LOOM_FITNESS_GOALS", "")
 FITNESS_LTHR: int = int(os.environ.get("LOOM_FITNESS_LTHR", "0"))
 FITNESS_FTP: int = int(os.environ.get("LOOM_FITNESS_FTP", "0"))
 
+# Strength history: the `## 4 · Tracking — IST` tables of the dated plan notes are
+# parsed into the store, and an estimated 1RM (Epley on reps+RIR) per exercise/side
+# drives the coach's load suggestions. PROGRESSION_PCT is the deliberate surcharge on
+# the best e1RM of the window — the point is to keep getting stronger, so the default
+# plans ABOVE the last session; the readiness traffic light takes it back down again.
+FITNESS_PROGRESSION_PCT: float = float(os.environ.get("LOOM_FITNESS_PROGRESSION_PCT", "5.0"))
+FITNESS_E1RM_WINDOW_D: int = int(os.environ.get("LOOM_FITNESS_E1RM_WINDOW_D", "120"))
+FITNESS_LIFT_RIR_TARGET: float = float(os.environ.get("LOOM_FITNESS_LIFT_RIR_TARGET", "2.0"))
+
 # The plan agent: model (None => RESEARCH_MODEL => account default) + turn budget.
 FITNESS_MODEL: str | None = os.environ.get("LOOM_FITNESS_MODEL") or None
 FITNESS_PLAN_MAX_TURNS: int = int(os.environ.get("LOOM_FITNESS_PLAN_MAX_TURNS", "30"))

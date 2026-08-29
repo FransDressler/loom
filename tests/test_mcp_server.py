@@ -203,12 +203,18 @@ def test_server_registers_fitness_data_tools():
     names = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
     assert {
         "fitness_status", "fitness_sync", "fitness_plan",
-        "fitness_overview", "fitness_activities", "fitness_oura", "fitness_query",
+        "fitness_overview", "fitness_week", "fitness_activities", "fitness_lifts",
+        "fitness_oura", "fitness_query",
     } <= names
 
 
 def test_fitness_overview_tool_without_store(fitness_env):
     res = asyncio.run(mcp_server.mcp.call_tool("fitness_overview", {}))
+    assert "Noch keine Fitness-Daten" in str(res)
+
+
+def test_fitness_lifts_tool_without_store(fitness_env):
+    res = asyncio.run(mcp_server.mcp.call_tool("fitness_lifts", {}))
     assert "Noch keine Fitness-Daten" in str(res)
 
 

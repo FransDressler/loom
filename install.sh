@@ -171,7 +171,7 @@ else
   cat <<EOF
   • Point Hermes (with your Gemini/other key configured there) at Loom's MCP server:
         uv run --directory "$REPO_DIR" loom-mcp
-    and install the portable skill recipes from "$REPO_DIR/skills/" into Hermes.
+    and install the portable skill recipes from "$REPO_DIR/plugin/skills/" into Hermes.
     Full wiring: docs/hermes-integration.md
 EOF
 fi
