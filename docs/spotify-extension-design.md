@@ -40,7 +40,7 @@ Feb-2026-korrekter Endpoint-Vorlage und `varunneal/utils.py` als Parser-Referenz
 | Config | `src/loom/config.py` *(erweitert)* | `LOOM_SPOTIFY_*`-Block + `MUSIC_DIR` |
 | OAuth-CLI | `src/loom/oauth_cli.py` *(minimal)* | `host`-Parameter (Redirect `127.0.0.1` statt `localhost`), rückwärtskompatibel |
 | Auth | `src/loom/spotify_cli.py` *(neu)* → `loom-spotify` | einmaliger `--auth`, `--status`, `--check` |
-| Skill | `skills/music/SKILL.md` + `plugin/commands/music.md` *(neu)* | `/loom:music` |
+| Skill | `plugin/skills/music/SKILL.md` + `plugin/commands/music.md` *(neu)* | `/loom:music` |
 | Auto-Präferenz | `src/loom/consolidate.py` *(erweitert)* | nächtliche Konsolidierung routet Musik-Signale in `musik/` |
 
 Token-Persistenz: reuse von `fitness.save_tokens/load_tokens` mit `service="spotify"`

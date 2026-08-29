@@ -13,7 +13,7 @@
 | `/loom:*`-Slash-Commands | ✅ | ❌ (Commands sind Claude-Code-only) |
 | Marketplace-Plugin (`plugin marketplace add`) | ✅ | ❌ |
 | Gebündelter MCP-Server (`mcp__loom__*`-Tools) | ✅ | ✅ über `claude_desktop_config.json` |
-| Agent-Skills (`skills/*/SKILL.md`) | ✅ | ✅ (Skills-Feature) |
+| Agent-Skills (`plugin/skills/*/SKILL.md`) | ✅ | ✅ (Skills-Feature) |
 
 Kurz: In Desktop bekommst du **Looms Werkzeuge** (Retrieval, Fitness, Spotify, Anki,
 Digest …) als MCP-Tools und kannst sie natürlichsprachlich aufrufen
@@ -87,7 +87,7 @@ zugreifen.
 
 ## Die Skills nutzen
 
-Die `skills/`-Ordner sind portable Agent-Skills. In Umgebungen mit dem
+Die `plugin/skills/`-Ordner sind portable Agent-Skills. In Umgebungen mit dem
 Skills-Feature (Claude Desktop / claude.ai) kannst du sie als Custom Skills
 bereitstellen; jede `SKILL.md` beschreibt, wann und wie sie greift. Die Skills
 rufen intern dieselben `mcp__loom__*`-Tools auf — der MCP-Server oben ist also die

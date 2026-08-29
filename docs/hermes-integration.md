@@ -15,14 +15,14 @@ mit Gemini.
 
 | Schicht | Tools | Claude nötig? |
 |---------|-------|---------------|
-| **Provider-frei** (reine Disk/Netz) | `complain`, `inbox_status`, `loom_status`, `schema`, `glossary`, `lint` (checks-only), `fitness_overview/status/sync/query` | nein — läuft out-of-the-box von jedem Host |
+| **Provider-frei** (reine Disk/Netz) | `complain`, `inbox_status`, `loom_status`, `schema`, `glossary`, `lint` (checks-only), `fitness_overview/week/status/sync/query` | nein — läuft out-of-the-box von jedem Host |
 | **Claude-backed Services** (starten intern einen Claude-Agenten) | `retrieve`, `research`, `digest`, `wiki`, `lint` (Agent-Pass), `normalize`, `clean`, `fitness_plan`, `anki` | ja (heute) — über das **portable Skill-Rezept** ersetzbar |
 
 Der Trick für die zweite Schicht: jeder denkende Skill ist nur *ein Prompt, der atomare
 Tools orchestriert*. Statt Looms eingebackenen Claude-Agenten aufzurufen, lässt du den
 **Gemini-Loop von Hermes** denselben Prompt fahren — gegen Looms atomare, provider-freie
 Tools. Das Flaggschiff `retrieve` liegt dafür als host-agnostisches Rezept in
-[`skills/retrieve/SKILL.md`](../skills/retrieve/SKILL.md).
+[`plugin/skills/retrieve/SKILL.md`](../plugin/skills/retrieve/SKILL.md).
 
 ## Schritt 1 — Loom-MCP-Server in Hermes einhängen
 
@@ -57,7 +57,7 @@ ist daran unbeteiligt. Hermes' Agent-Loop, Session-Kompaktion und Auth gehören 
 
 ## Schritt 3 — die Skill-Rezepte als Hermes-Skills installieren
 
-Kopiere die gewünschten `skills/<name>/SKILL.md` in Hermes' Skill-Verzeichnis (Hermes
+Kopiere die gewünschten `plugin/skills/<name>/SKILL.md` in Hermes' Skill-Verzeichnis (Hermes
 entdeckt Skills aus `skills/` bzw. `.agents/skills/`). Jedes Rezept deklariert seine
 benötigten Tools, den Loop und die harten Grenzen für einen einzelnen Host-LLM. **Alle
 Skills sind als portable Rezepte vorhanden:**

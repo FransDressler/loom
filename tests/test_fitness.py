@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
-import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -153,7 +151,7 @@ def test_sync_strava_upserts_details_and_cursor(env, monkeypatch):
     monkeypatch.setattr(config, "STRAVA_CLIENT_SECRET", "sec")
     fitness.save_tokens("strava", {"access_token": "a", "refresh_token": "r", "expires_at": 9e9})
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     summaries = [_strava_summary(1, now - timedelta(hours=3)), _strava_summary(2, now - timedelta(hours=1))]
     calls = {}
 
@@ -181,7 +179,7 @@ def test_sync_strava_survives_rate_limit(env, monkeypatch):
     monkeypatch.setattr(config, "STRAVA_CLIENT_ID", "id")
     monkeypatch.setattr(config, "STRAVA_CLIENT_SECRET", "sec")
     fitness.save_tokens("strava", {"access_token": "a", "refresh_token": "r", "expires_at": 9e9})
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     monkeypatch.setattr(fitness.strava, "list_activities",
                         lambda *a, **kw: [_strava_summary(7, now)])
 
@@ -227,7 +225,7 @@ def test_sync_strava_tombstones_deleted_activities(env, monkeypatch):
     monkeypatch.setattr(config, "STRAVA_CLIENT_ID", "id")
     monkeypatch.setattr(config, "STRAVA_CLIENT_SECRET", "sec")
     fitness.save_tokens("strava", {"access_token": "a", "refresh_token": "r", "expires_at": 9e9})
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     monkeypatch.setattr(fitness.strava, "list_activities", lambda *a, **kw: [_strava_summary(5, now)])
     monkeypatch.setattr(fitness.strava, "get_activity", lambda *a, **kw: {})  # missing_ok 404 -> {}
     monkeypatch.setattr(fitness.strava, "get_streams", lambda *a, **kw: {})
@@ -293,7 +291,7 @@ def test_plan_due_gating(env):
 def test_due_analyses_window_batch_and_dedup(env, monkeypatch):
     monkeypatch.setattr(config, "FITNESS_ANALYZE_BATCH", 2)
     conn = fitness.open_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def insert(i, hours_ago, detail="{}"):
         start = (now - timedelta(hours=hours_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -338,6 +336,87 @@ def test_build_day_context_with_and_without_readiness(env):
     conn.close()
 
 
+def test_build_week_context_running_week(env):
+    """Die laufende KALENDERwoche (Mo→heute) — nicht das rollierende 7-Tage-Fenster."""
+    conn = fitness.open_db()
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    _with_readiness(conn, today.isoformat())
+    conn.execute(
+        "INSERT INTO activities (id, start_date, day, name, sport_type, moving_time_s, "
+        "distance_m, tss, raw_json, synced_at) VALUES (11, ?, ?, 'PUSH A', 'WeightTraining', "
+        "3600, 0, 55, '{}', '')",
+        (f"{monday.isoformat()}T18:00:00Z", monday.isoformat()),
+    )
+    # ein Workout VOR der Woche darf die Wochenbilanz nicht anfassen
+    before = (monday - timedelta(days=1)).isoformat()
+    conn.execute(
+        "INSERT INTO activities (id, start_date, day, name, sport_type, moving_time_s, "
+        "distance_m, tss, raw_json, synced_at) VALUES (12, ?, ?, 'Sonntagsrunde', 'Ride', "
+        "7200, 60000, 99, '{}', '')",
+        (f"{before}T09:00:00Z", before),
+    )
+    block = fitness.build_week_context(conn, today)
+    assert "Laufende Woche" in block and "PUSH A" in block
+    assert "Sonntagsrunde" not in block
+    assert f"{fitness._WEEKDAYS_DE[monday.weekday()][:2]} {monday.isoformat()}" in block
+    assert "55 TSS" in block
+    assert f"Resttage inkl. heute:** {7 - today.weekday()}" in block
+    if today.weekday() > 1:  # ein vergangener Tag ohne Eintrag bleibt sichtbar
+        assert "nichts geloggt" in block
+    assert block in fitness.build_day_context(conn, today)  # hängt im Tageskontext
+    conn.close()
+
+
+def test_iso_week_bounds():
+    monday, sunday, label = fitness.iso_week_bounds(date(2026, 8, 26))  # Mittwoch
+    assert (monday, sunday) == (date(2026, 8, 24), date(2026, 8, 30))
+    assert label == "2026-KW35"
+
+
+def test_vault_map_lists_what_exists(env, tmp_path):
+    """Die Landkarte wird aus dem Ordner erzeugt — neue Notizen tauchen ohne
+    Code-Änderung auf, fehlende erfinden sich nicht."""
+    vault = tmp_path / "vault"
+    fitness.ensure_scaffold(str(vault))
+    fit = vault / config.FITNESS_DIR
+    (fit / "Athletenprofil.md").write_text("---\ncreated: x\n---\n# Athletenprofil\nFTP 240 W.\n")
+    (fit / "Judo-Block.md").write_text("---\ncreated: x\n---\n# Judo-Block\nExplosivkraft bis September.\n")
+    (fit / f"{date.today().isoformat()} Trainingsplan.md").write_text("# Plan\n")
+
+    text = fitness.vault_map_text(str(vault))
+    assert "Vault-Landkarte" in text
+    assert "[[Athletenprofil]]" in text and "FTP 240 W." in text      # Gist aus der Notiz
+    assert "[[Judo-Block]]" in text                                   # Blockplan gefunden
+    assert "[[readiness-steuerung]]" in text                          # Wissen verlinkt
+    assert config.FITNESS_WEEK_TEMPLATE_FILE.removesuffix(".md") in text
+    assert "Verletzungsprofil" not in text                            # existiert nicht → nicht erfunden
+
+    # Rückblick-Notizen landen NICHT bei den Plänen — Tag oder Dateiname reicht
+    (fit / "Historie.md").write_text("---\ntags: [fitness, trainingsverlauf]\n---\n# Historie\n")
+    (fit / "TSS-CTL-Verlauf.md").write_text("---\ntags: [fitness, tss]\n---\n# Verlauf\n")
+    text = fitness.vault_map_text(str(vault))
+    plans, back = text.split("**Rückblick**")
+    assert "[[Historie]]" in back and "[[TSS-CTL-Verlauf]]" in back
+    assert "[[Historie]]" not in plans and "[[Judo-Block]]" in plans
+    assert fitness.vault_map_text(str(tmp_path / "leer")) == ""
+
+
+def test_scaffold_links_week_note_in_hub(env, tmp_path):
+    """Auch ein ALTER Hub (vor der Wochen-Notiz angelegt) wird nachverlinkt — genau einmal."""
+    vault = tmp_path / "vault"
+    hub = vault / config.FITNESS_DIR / config.FITNESS_HUB_FILE
+    hub.parent.mkdir(parents=True)
+    hub.write_text("# Fitness — Trainings-Hub\n\n## Tagespläne\n")
+
+    fitness.ensure_scaffold(str(vault))
+    body = hub.read_text()
+    link = config.FITNESS_WEEK_FILE.removesuffix(".md")
+    assert body.count(f"[[{link}]]") == 1
+    fitness.ensure_scaffold(str(vault))
+    assert hub.read_text().count(f"[[{link}]]") == 1  # idempotent
+
+
 def test_ensure_scaffold_seeds_once(env, tmp_path):
     vault = tmp_path / "vault"
     fitness.ensure_scaffold(str(vault))
@@ -352,8 +431,68 @@ def test_ensure_scaffold_seeds_once(env, tmp_path):
     assert marker.read_text() == "EDITED BY USER"  # never overwritten
 
 
+def test_ensure_scaffold_seeds_note_templates(env, tmp_path):
+    """Das Ausgabeschema lebt als editierbare Vorlage im Vault, nicht nur im Prompt."""
+    vault = tmp_path / "vault"
+    fitness.ensure_scaffold(str(vault))
+    plan_tpl = vault / fitness.plan_template_rel()
+    daily_tpl = vault / fitness.daily_template_rel()
+    week_tpl = vault / fitness.week_template_rel()
+    assert plan_tpl.exists() and daily_tpl.exists() and week_tpl.exists()
+
+    body = plan_tpl.read_text()
+    for section in (
+        "## 1 · Tageszustand",
+        "## 2 · Fokus",
+        "## 3 · Workout",
+        "## 4 · Tracking — IST",
+        "## 5 · Alternative",
+        "## 6 · Begründung",
+        "## 7 · Konsequenzen & Offen",
+        "## 8 · Verknüpft",
+    ):
+        assert section in body
+    # feste Spaltensätze — Kraft und Ausdauer getrennt; Kraft trägt eine Zeit-Spalte
+    assert "| # | Übung | Sätze × Wdh | Last | Pause | RIR | Zeit | Cue / Constraint |" in body
+    assert "| # | Block | Dauer | Ziel (W / HF-Zone) | TF | Cue / Constraint |" in body
+    # 45-min-Kern plus Bonus-Block: beides muss als Schema im Vault stehen
+    assert "**Zeitbudget:**" in body
+    assert "### Bonus — optional" in body
+    # abhakbare Listen statt ☐-Tabellenzellen, und Last ist nie »—«
+    assert "`- [ ]`-Listen" in body and "keine anklickbare Checkbox" in body
+    assert "Die Spalte `Last` trägt IMMER eine Zahl" in body
+    # das Arbeitsblatt trägt die LEEREN Eintragespalten
+    daily = daily_tpl.read_text()
+    assert "| # | Übung | Ziel | Gewicht | S1 | S2 | S3 | S4 | Pause | RIR / Notiz |" in daily
+    assert "## Bonus — optional" in daily
+    assert "**Zeitbudget:**" in daily
+
+    # die Wochen-Notiz: fünf feste Sektionen, Soll- und Ist-Tabelle, kw im Frontmatter
+    week = week_tpl.read_text()
+    for section in (
+        "## 1 · Soll — die geplante Woche",
+        "## 2 · Ist — was bis",
+        "## 3 · Wochenbilanz",
+        "## 4 · Rest der Woche",
+        "## 5 · Verknüpft",
+    ):
+        assert section in week
+    assert "| Tag | Einheit (Soll) | Typ | Umfang / TSS | Constraint / Quelle |" in week
+    assert "| Tag | Ist | Dauer | TSS | Readiness | Bewertung |" in week
+    assert "kw: <" in week
+
+    plan_tpl.write_text("EDITED BY USER")
+    fitness.ensure_scaffold(str(vault))
+    assert plan_tpl.read_text() == "EDITED BY USER"  # Vault-Fassung gewinnt
+
+
 def test_note_paths(env):
     assert fitness.plan_note_rel(date(2026, 6, 10)) == "fitness/2026-06-10 Trainingsplan.md"
+    assert fitness.daily_note_rel() == "fitness/Daily Training — Heute.md"
+    assert fitness.plan_template_rel() == "fitness/vorlagen/Vorlage — Trainingsplan.md"
+    assert fitness.daily_template_rel() == "fitness/vorlagen/Vorlage — Daily Training.md"
+    assert fitness.week_note_rel() == "fitness/Wochenplan — Aktuell.md"
+    assert fitness.week_template_rel() == "fitness/vorlagen/Vorlage — Wochenplan.md"
     rel = fitness.analysis_note_rel("2026-06-10", 'Run "Tempo/Intervalle"')
     assert rel.startswith("fitness/analysen/2026-06-10 Run")
     assert '"' not in rel and "/" not in rel.split("analysen/")[1]
@@ -399,12 +538,32 @@ def test_fitness_prompts_exist_and_carry_anchors(env):
     assert "training-skoliose" in plan            # Fallback bis Phase 4
     assert str(config.FITNESS_SUMMARY_MAX_CHARS) in plan
     assert "Plan vs. Ist" in ana and "Athletenprofil" in ana
+    # Das Ausgabeschema ist verdrahtet: beide Vorlagen + beide Zielnotizen
+    assert config.FITNESS_PLAN_TEMPLATE_FILE in plan
+    assert config.FITNESS_DAILY_TEMPLATE_FILE in plan
+    assert config.FITNESS_DAILY_FILE in plan
+    assert "Note schema — NOT negotiable" in plan
+    # Wochen-Ebene + Landkarte sind im Coach-Prompt verdrahtet
+    assert config.FITNESS_WEEK_FILE in plan and config.FITNESS_WEEK_TEMPLATE_FILE in plan
+    assert "VAULT MAP" in plan and "Where things live" in plan
+    assert "Write ALL THREE notes" in plan
+    # die drei Regelblöcke, die Platzierung, Last und Dauer festnageln
+    assert "# Session-Aufbau — feste Zuordnung" in plan
+    assert "# Last & Progression" in plan and "Kraftverlauf" in plan
+    assert "# Zeitbudget" in plan and "45 minutes" in plan
+    assert "session-aufbau" in plan               # die Wissensnotiz ist verlinkt
+    # Verletzungsprofil: harte Sperre beim Planen + Fortschreiben danach
+    assert "HARD-BLOCKED" in plan and "Ersatz" in plan
+    assert "Keeping the injury profile current" in plan and "Update-Protokoll" in plan
+    assert "asymmetrie-steuerung" in plan and "workout-bibliothek" in plan
+    assert config.FITNESS_WEEK_FILE in ana        # die Analyse ordnet in die Woche ein
+    assert "4 · Tracking — IST" in ana        # die Analyse liest die IST-Sektion
 
 
 def test_run_plan_writes_note_with_mocked_agent(env, monkeypatch):
     import asyncio
 
-    import loom.agent as agent
+    from loom import agent
 
     vault = env / "vault"
     captured = {}
@@ -412,9 +571,14 @@ def test_run_plan_writes_note_with_mocked_agent(env, monkeypatch):
     async def fake_run_capture(text, options):
         captured["prompt"] = text
         captured["system"] = options.system_prompt
-        target = vault / fitness.plan_note_rel(date.today())
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("---\ncreated: x\n---\n## Fokus\nRuhetag")
+        for rel, body in (
+            (fitness.plan_note_rel(date.today()), "---\ncreated: x\n---\n## 1 · Tageszustand\n"),
+            (fitness.daily_note_rel(), "---\ncreated: x\n---\n## Hauptteil — eintragen\n"),
+            (fitness.week_note_rel(), "---\nkw: x\n---\n## 1 · Soll — die geplante Woche\n"),
+        ):
+            target = vault / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body)
         return "Fokus: Ruhetag — TSB niedrig."
 
     monkeypatch.setattr(agent, "run_capture", fake_run_capture)
@@ -424,16 +588,85 @@ def test_run_plan_writes_note_with_mocked_agent(env, monkeypatch):
     assert summary == "Fokus: Ruhetag — TSB niedrig."
     assert "Athletenprofil" in captured["system"]           # Coach-Prompt verdrahtet
     assert "Datenlage" in captured["prompt"]                # Tageskontext kam an
+    # Der Auftrag nennt beide Vorlagen und beide Zielpfade
+    assert fitness.plan_template_rel() in captured["prompt"]
+    assert fitness.daily_template_rel() in captured["prompt"]
+    assert fitness.daily_note_rel() in captured["prompt"]
+    # …und die Wochen-Ebene: Vorlage, Zielnotiz und die generierte Landkarte
+    assert fitness.week_template_rel() in captured["prompt"]
+    assert fitness.week_note_rel() in captured["prompt"]
+    assert "Vault-Landkarte" in captured["prompt"]
+    assert "Laufende Woche" in captured["prompt"]        # Wochen-Ist im Datenblock
     assert (vault / fitness.plan_note_rel(date.today())).exists()
+    assert (vault / fitness.daily_note_rel()).exists()
+    assert (vault / fitness.week_note_rel()).exists()
     # Tagesmarker gesetzt → zweiter Lauf desselben Tages ist ein No-op
     assert asyncio.run(fitness.run_plan(str(vault))) is None
+
+
+def test_run_plan_carries_athlete_note(env, monkeypatch):
+    """Was der Athlet heute sagt, weiß kein Sensor — es muss den Coach erreichen,
+    ohne dokumentierte Sperren aufzuheben."""
+    import asyncio
+
+    from loom import agent
+
+    vault = env / "vault"
+    captured = {}
+
+    async def fake_run_capture(text, options):
+        captured["prompt"] = text
+        for rel in (fitness.plan_note_rel(date.today()), fitness.daily_note_rel(), fitness.week_note_rel()):
+            target = vault / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("x")
+        return "ok"
+
+    monkeypatch.setattr(agent, "run_capture", fake_run_capture)
+    monkeypatch.setattr(config, "FITNESS_CHANNEL", "off")
+
+    asyncio.run(fitness.run_plan(str(vault), note="Finger frei, heute Kraft"))
+    assert "Meldung des Athleten" in captured["prompt"]
+    assert "Finger frei, heute Kraft" in captured["prompt"]
+    assert "hebt KEINE Sperre auf" in captured["prompt"]
+
+    # ohne Meldung bleibt der Auftrag unverändert schlank
+    (vault / fitness.plan_note_rel(date.today())).unlink()
+    asyncio.run(fitness.run_plan(str(vault), force=True))
+    assert "Meldung des Athleten" not in captured["prompt"]
+
+
+def test_run_plan_flags_missing_worksheet(env, monkeypatch):
+    """Nur die Plan-Notiz geschrieben = Schema halb befolgt → sichtbare Warnung,
+    aber der Tag bleibt geplant (die Notiz existiert ja)."""
+    import asyncio
+
+    from loom import agent
+
+    vault = env / "vault"
+    pushed = []
+
+    async def plan_only(text, options):
+        target = vault / fitness.plan_note_rel(date.today())
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("## 1 · Tageszustand\n")
+        return "Fokus: Ruhetag."
+
+    monkeypatch.setattr(agent, "run_capture", plan_only)
+    monkeypatch.setattr(fitness, "_push", pushed.append)
+
+    result = asyncio.run(fitness.run_plan(str(vault)))
+    assert result is not None and "Arbeitsblatt" in result and "fehlt" in result
+    assert "Wochen-Notiz" in result
+    assert pushed == ["Fokus: Ruhetag."]   # die Warnung geht NICHT aufs Handy
+    assert fitness._load_state().get("last_plan_day") == date.today().isoformat()
 
 
 def test_run_plan_reports_unwritten_note(env, monkeypatch):
     """Schreibt der Agent die Notiz nicht, darf der Tag NICHT als geplant gelten."""
     import asyncio
 
-    import loom.agent as agent
+    from loom import agent
 
     vault = env / "vault"
 
@@ -463,7 +696,7 @@ def test_day_context_omits_external_load_when_calendar_off(env, monkeypatch):
 def test_day_context_includes_external_load(env, monkeypatch):
     monkeypatch.setattr(config, "CALENDAR", True)
 
-    import loom.calsync as calsync
+    from loom import calsync
 
     today = date.today()
     monkeypatch.setattr(calsync, "workload", lambda day, days=7: {
@@ -486,7 +719,7 @@ def test_day_context_survives_broken_calendar(env, monkeypatch):
     """Kalenderprobleme dürfen den Coach nie stoppen — Abschnitt fehlt einfach."""
     monkeypatch.setattr(config, "CALENDAR", True)
 
-    import loom.calsync as calsync
+    from loom import calsync
 
     def boom(day, days=7):
         raise OSError("calendar.db kaputt")
@@ -662,3 +895,237 @@ def test_sync_oura_skips_collection_missing_scope(env, monkeypatch):
         conn.close()
     assert result["docs"] == 1                          # daily_readiness still landed
     assert result["scope_skipped"] == ["daily_stress"]  # un-scoped one skipped, not fatal
+
+
+# --- Kraft-Historie: IST-Tabellen parsen → e1RM → Lastvorschlag --------------------
+
+_IST_STANDARD = """---
+datum: 2026-08-26
+---
+# Trainingsplan
+
+## 3 · Workout
+
+## 4 · Tracking — IST
+
+### Kraft
+
+| # | Übung | Ziel | Ist-Last | S1 | S2 | S3 | S4 | RIR | Bewertung |
+|---|---|---|---|---|---|---|---|---|---|
+| A | Hip Thrust | 4×4 @ 110 kg | **119 kg** (110 + 9 kg Stange) | 4 | 5 | 4 | — | 2 | ok |
+| B-L | Chest-Supported Row | 4×6 @ 65 kg | 65 kg | 6 | 6 | — | — | 2 | ok |
+| B-R | Chest-Supported Row | 3×6 @ 55 kg | 55 kg | 6 | 6 | — | — | 2 | ok |
+| C | Gi-Hold | 3× 5–8 s | BW | 8 s | 5 s | 7 s | — | — | Griff |
+| D | Weighted Klimmzug | 4×5 | BW+5 kg | 5 | 5 | — | — | 1 | ok |
+| E | Side Plank | wie geplant | BW | L50 R30 | L50 R30 | — | — | — | Asymmetrie gehalten |
+
+**Tageslog:** Trainiert ☑ ja
+
+## 5 · Alternative
+"""
+
+# Ältere Notiz: RPE statt RIR, Last als L/R in EINER Zelle, unnummerierte Überschrift.
+_IST_LEGACY = """---
+datum: 2026-08-09
+---
+# Trainingsplan
+
+## Tracking — IST
+
+### Kraft
+
+| # | Übung | Ziel | Ist-Last | S1 | S2 | S3 | RPE | Bewertung |
+|---|---|---|---|---|---|---|---|---|
+| A | Front Squat | 4×5 @ 70 kg | 70 kg | 5 | 5 | 5 | 8 | ✅ |
+| B | Chest-Sup Row | L/R | L 60 / R 50 kg | 8 | 8 | — | 8 | ✅ |
+| C | Pallof Press links | 3×10 mit 5 s Hold | 10 kg | 10 | 10 | 10 | 8 | ✅ |
+| D | Side Delts | 3×15 | leicht | | | | | nicht notiert |
+
+## Alternative
+"""
+
+_NO_IST = """---
+datum: 2026-08-29
+---
+# Trainingsplan
+
+## 3 · Workout
+
+## 4 · Verboten heute
+"""
+
+
+def _write_plan(vault, name, body):
+    fit = vault / "fitness"
+    fit.mkdir(parents=True, exist_ok=True)
+    path = fit / name
+    path.write_text(body)
+    return path
+
+
+def test_parse_plan_note_standard_layout(env, tmp_path):
+    path = _write_plan(tmp_path / "vault", "2026-08-26 Trainingsplan.md", _IST_STANDARD)
+    records, skipped = fitness.parse_plan_note(path)
+    assert skipped == 0
+
+    def sets_of(exercise, side="-"):
+        return [r for r in records if r.exercise == exercise and r.side == side]
+
+    hip = sets_of("hip thrust")
+    assert [r.reps for r in hip] == [4, 5, 4]
+    assert all(r.weight_kg == 119.0 for r in hip)      # erste kg-Zahl, nicht die Stange
+
+    # asymmetrisch ⇒ zwei Zeilen, ein Übungsschlüssel, getrennte Seiten und Lasten
+    left, right = sets_of("chest-supported row", "L"), sets_of("chest-supported row", "R")
+    assert len(left) == len(right) == 2
+    assert {r.weight_kg for r in left} == {65.0} and {r.weight_kg for r in right} == {55.0}
+
+    hold = sets_of("gi-hold")
+    assert [r.seconds for r in hold] == [8.0, 5.0, 7.0]   # »8 s« ist Zeit, nicht 8 Wdh
+    assert all(r.bodyweight and r.weight_kg is None for r in hold)
+
+    pullup = sets_of("weighted klimmzug")
+    assert all(r.bodyweight == 1 and r.weight_kg == 5.0 for r in pullup)  # BW+5 kg
+
+    # »L50 R30« ohne Einheit: Side Plank ist eine Halteübung ⇒ Sekunden, nicht Wdh
+    plank_l = sets_of("side plank", "L")
+    assert [r.seconds for r in plank_l] == [50.0, 50.0] and all(r.reps is None for r in plank_l)
+
+
+def test_parse_plan_note_legacy_layouts(env, tmp_path):
+    path = _write_plan(tmp_path / "vault", "2026-08-09 Trainingsplan.md", _IST_LEGACY)
+    records, skipped = fitness.parse_plan_note(path)
+
+    squat = [r for r in records if r.exercise == "front squat"]
+    assert len(squat) == 3
+    assert squat[0].rir == 2.0        # RPE 8 heißt RIR 2 — nicht RIR 8
+
+    # Last »L 60 / R 50 kg« in EINER Zelle wird auf beide Seiten aufgeteilt
+    row = {(r.side, r.set_no): r.weight_kg for r in records if r.exercise == "chest-sup row"}
+    assert row[("L", 1)] == 60.0 and row[("R", 1)] == 50.0
+
+    # »5 s Hold« im Ziel ist ein Cue — die S-Spalten bleiben Wiederholungen
+    pallof = [r for r in records if r.exercise == "pallof press"]
+    assert pallof and all(r.reps == 10 and r.seconds is None for r in pallof)
+    assert {r.side for r in pallof} == {"L"}   # »links« im Namen ist die Seite
+
+    assert skipped == 1               # Side Delts: Last unlesbar, keine Sätze eingetragen
+
+
+def test_parse_plan_note_without_ist_section(env, tmp_path):
+    path = _write_plan(tmp_path / "vault", "2026-08-29 Trainingsplan.md", _NO_IST)
+    assert fitness.parse_plan_note(path) == ([], 0)
+
+
+def test_ingest_plan_notes_is_idempotent_and_follows_edits(env, tmp_path):
+    vault = tmp_path / "vault"
+    _write_plan(vault, "2026-08-26 Trainingsplan.md", _IST_STANDARD)
+    _write_plan(vault, "2026-08-29 Trainingsplan.md", _NO_IST)
+    (vault / "fitness" / "Athletenprofil.md").write_text("kein Trainingsplan")  # wird ignoriert
+
+    conn = fitness.open_db()
+    try:
+        first, _ = fitness.ingest_plan_notes(conn, str(vault))
+        again, _ = fitness.ingest_plan_notes(conn, str(vault))
+        rows = conn.execute("SELECT COUNT(*) AS n FROM strength_sets").fetchone()["n"]
+        assert first == again == rows > 0
+
+        # Eine korrigierte Notiz ersetzt ihren Tag vollständig — keine Karteileichen.
+        _write_plan(vault, "2026-08-26 Trainingsplan.md", _IST_LEGACY.replace("2026-08-09", "2026-08-26"))
+        fitness.ingest_plan_notes(conn, str(vault))
+        names = {r["exercise"] for r in conn.execute("SELECT DISTINCT exercise FROM strength_sets")}
+        assert "front squat" in names and "hip thrust" not in names
+    finally:
+        conn.close()
+
+
+def test_e1rm_and_load_suggestion():
+    # Epley auf effektive Wdh: 65 kg × 6 @ RIR 2 ⇒ 65 · (1 + 8/30)
+    assert fitness.e1rm(65, 6, 2) == pytest.approx(65 * (1 + 8 / 30))
+    assert fitness.e1rm(100, 1, 0) == pytest.approx(100 * (1 + 1 / 30))
+    # load_for ist die Umkehrung
+    est = fitness.e1rm(65, 6, 2)
+    assert fitness.load_for(est, 6, 2) == pytest.approx(65)
+    # mehr Wiederholungen ⇒ weniger Last
+    assert fitness.load_for(est, 12, 2) < fitness.load_for(est, 5, 2)
+    assert fitness.round_plate(65.9) == 65.0 and fitness.round_plate(66.4) == 67.5
+
+
+def test_strength_block_carries_history_and_suggestions(env, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "FITNESS_PROGRESSION_PCT", 5.0)
+    monkeypatch.setattr(config, "FITNESS_LIFT_RIR_TARGET", 2.0)
+    vault = tmp_path / "vault"
+    _write_plan(vault, "2026-08-26 Trainingsplan.md", _IST_STANDARD)
+    conn = fitness.open_db()
+    try:
+        assert fitness.strength_block(conn, date(2026, 8, 27)) == ""   # noch nichts gelesen
+        fitness.ingest_plan_notes(conn, str(vault))
+        block = fitness.strength_block(conn, date(2026, 8, 27))
+        assert "Kraftverlauf — e1RM & Lastvorschlag" in block
+
+        history = {(h["exercise"], h["side"]): h for h in fitness.lift_history(conn, date(2026, 8, 27))}
+        left = history[("chest-supported row", "L")]
+        assert left["e1rm"] == pytest.approx(fitness.e1rm(65, 6, 2))
+        # der Vorschlag liegt bewusst ÜBER der zuletzt gehobenen Last
+        assert left["progressed"] == pytest.approx(left["e1rm"] * 1.05)
+        assert fitness.load_for(left["progressed"], 6, 2) > 65
+
+        # Halteübungen liefern kein e1RM, verschwinden aber nicht aus der Historie
+        assert history[("gi-hold", "-")]["e1rm"] is None
+        assert "Gi-Hold" in block
+    finally:
+        conn.close()
+
+
+def test_day_context_embeds_strength_block(env, tmp_path):
+    vault = tmp_path / "vault"
+    _write_plan(vault, "2026-08-26 Trainingsplan.md", _IST_STANDARD)
+    conn = fitness.open_db()
+    try:
+        day = date(2026, 8, 27)
+        assert "Kraftverlauf" not in fitness.build_day_context(conn, day)
+        fitness.ingest_plan_notes(conn, str(vault))
+        context = fitness.build_day_context(conn, day)
+        assert fitness.strength_block(conn, day) in context
+        # die Wochen-Sektion steht davor und überlebt den Cap
+        assert "Laufende Woche" in context
+    finally:
+        conn.close()
+
+
+def test_lifts_text_filters_and_reports_missing_store(env, tmp_path, monkeypatch):
+    assert fitness.lifts_text() == fitness._NO_FITNESS_DATA   # noch keine DB
+    vault = tmp_path / "vault"
+    _write_plan(vault, "2026-08-26 Trainingsplan.md", _IST_STANDARD)
+    conn = fitness.open_db()
+    try:
+        fitness.ingest_plan_notes(conn, str(vault))
+    finally:
+        conn.close()
+    monkeypatch.setattr(fitness, "date", _FrozenDate)
+
+    text = fitness.lifts_text("chest")
+    assert "Chest-Supported Row" in text and "Hip Thrust" not in text
+    assert "e1RM" in text and "Vorschlag" in text
+    assert "Keine Kraft-Historie" in fitness.lifts_text("gibtsnicht")
+
+
+class _FrozenDate(date):
+    """`lifts_text` fragt today() — die Fixture-Notizen liegen im August 2026."""
+
+    @classmethod
+    def today(cls):
+        return date(2026, 8, 27)
+
+
+def test_reseed_pack_notes_overwrites_vault_copies(env, tmp_path):
+    vault = tmp_path / "vault"
+    fitness.ensure_scaffold(str(vault))
+    plan_tpl = vault / fitness.plan_template_rel()
+    plan_tpl.write_text("EDITED BY USER")
+    fitness.ensure_scaffold(str(vault))
+    assert plan_tpl.read_text() == "EDITED BY USER"      # normaler Lauf fasst nichts an
+
+    fitness.reseed_pack_notes(str(vault))                # --reseed schon
+    assert "## 3 · Workout" in plan_tpl.read_text()
+    assert (vault / "fitness" / "wissen" / "session-aufbau.md").exists()

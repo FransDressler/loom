@@ -87,25 +87,25 @@ What that means in practice — two tiers of tools:
 
 | Tier | Tools | Needs Claude? | Works from Hermes/Gemini today |
 |------|-------|---------------|--------------------------------|
-| **Provider-free** (pure disk/network) | `complain`, `inbox_status`, `loom_status`, `schema`, `glossary`, `lint` (checks-only), `fitness_overview/status/sync/query` | No | ✅ yes, out of the box |
+| **Provider-free** (pure disk/network) | `complain`, `inbox_status`, `loom_status`, `schema`, `glossary`, `lint` (checks-only), `fitness_overview/week/status/sync/query` | No | ✅ yes, out of the box |
 | **Claude-backed services** (run an internal Claude agent) | `retrieve`, `research`, `digest`, `wiki`, `lint` (agent pass), `normalize`, `clean`, `fitness_plan`, `anki` | Yes (today) | ⚠️ via the portable skill recipe — see below |
 
 **Portable skills.** Each agentic skill is just a *prompt that orchestrates atomic
-tools*, so every one ships as a host-agnostic recipe under [`skills/`](skills/) that any
+tools*, so every one ships as a host-agnostic recipe under [`skills/`](plugin/skills/) that any
 LLM host (Hermes + Gemini, …) can run against Loom's MCP server — no Claude involved:
 
 | Skill | Portable recipe | Atomic deps beyond Read/Write/Glob/Grep |
 |-------|-----------------|------------------------------------------|
-| [`retrieve`](skills/retrieve/SKILL.md) | cited recall + complaint | `complain` (MCP) |
-| [`builder`](skills/builder/SKILL.md) | work one complaint, revise notes | queue file-moves (Bash) |
-| [`digest`](skills/digest/SKILL.md) | rebuild the overview note | — |
-| [`fitness`](skills/fitness/SKILL.md) | Oura/Strava → daily plan | `fitness_*` read tools (MCP) |
-| [`anki`](skills/anki/SKILL.md) | notes → cards → Anki | AnkiConnect (plain HTTP/curl) |
-| [`cleaner`](skills/cleaner/SKILL.md) | declutter → `.trash` (confirm) | `lint` checks (MCP) |
-| [`wiki`](skills/wiki/SKILL.md) | source notes → concept wiki | — (sequential, not parallel) |
-| [`deep-research`](skills/deep-research/SKILL.md) | topic → linked cluster | host WebSearch/WebFetch; Mathpix OCR |
-| [`ingest`](skills/ingest/SKILL.md) | drop folder → vault | Mathpix OCR (HTTP/curl or `loom-ingest`) |
-| [`checkpoint`](skills/checkpoint/SKILL.md) | discussion → checkpoint + wiki | the `wiki` skill/tool (MCP/CLI) |
+| [`retrieve`](plugin/skills/retrieve/SKILL.md) | cited recall + complaint | `complain` (MCP) |
+| [`builder`](plugin/skills/builder/SKILL.md) | work one complaint, revise notes | queue file-moves (Bash) |
+| [`digest`](plugin/skills/digest/SKILL.md) | rebuild the overview note | — |
+| [`fitness`](plugin/skills/fitness/SKILL.md) | Oura/Strava → daily plan | `fitness_*` read tools (MCP) |
+| [`anki`](plugin/skills/anki/SKILL.md) | notes → cards → Anki | AnkiConnect (plain HTTP/curl) |
+| [`cleaner`](plugin/skills/cleaner/SKILL.md) | declutter → `.trash` (confirm) | `lint` checks (MCP) |
+| [`wiki`](plugin/skills/wiki/SKILL.md) | source notes → concept wiki | — (sequential, not parallel) |
+| [`deep-research`](plugin/skills/deep-research/SKILL.md) | topic → linked cluster | host WebSearch/WebFetch; Mathpix OCR |
+| [`ingest`](plugin/skills/ingest/SKILL.md) | drop folder → vault | Mathpix OCR (HTTP/curl or `loom-ingest`) |
+| [`checkpoint`](plugin/skills/checkpoint/SKILL.md) | discussion → checkpoint + wiki | the `wiki` skill/tool (MCP/CLI) |
 
 The Claude-Code build accelerates the heavy ones (`wiki`, `deep-research`, `ingest`)
 with Python-parallel multi-agent fan-out; the portable recipes do the same work
